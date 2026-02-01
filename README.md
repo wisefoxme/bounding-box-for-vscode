@@ -4,8 +4,8 @@ A Visual Studio Code extension for viewing and editing bounding box annotations 
 
 ## Features
 
-- **Sidebar view**: Activity Bar icon opens an explorer that lists your project’s images. Expand an image to see a "Bounding boxes" node and its child items (Box 1, Box 2, …). Click a box to open the image in the editor with that box selected for editing.
-- **Custom editor**: Opening an image or a bounding box file opens a webview that shows the image with boxes drawn on top. Select a box (by clicking it or from the tree) and drag its edges or corners to resize, or drag the body to move. Double-click a box to delete it.
+- **Sidebar view**: Activity Bar icon opens an explorer that lists your project’s images. Expand an image to see "Bounding boxes" and its box items; click a box to open the image with that box selected. The **Bounding Boxes** section shows boxes for the currently selected image; use "Create new bounding box" (with the + icon) to add a box—this creates the bbox file if needed and opens the editor with a new default box.
+- **Custom editor**: Opening an image opens a webview with boxes drawn on top. Select a box and drag edges or corners to resize, or drag the body to move. Double-click a box to delete it. Saving creates or updates the bbox file automatically.
 - **Configurable paths**: Use VS Code settings (user or workspace) to set where images and bounding box files live; boxes are matched to images by file name.
 - **Bounding box format**: Default format is COCO (`x_min y_min width height` in pixels). You can switch to other formats (e.g. YOLO, Pascal VOC) via settings.
 

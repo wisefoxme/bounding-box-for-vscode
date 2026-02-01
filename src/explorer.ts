@@ -146,11 +146,35 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 	}
 }
 
-export function registerExplorer(context: vscode.ExtensionContext): void {
+export function registerExplorer(
+	context: vscode.ExtensionContext,
+	onSelectionChange?: (imageUri: vscode.Uri | undefined) => void,
+): { provider: ProjectTreeDataProvider; treeView: vscode.TreeView<ExplorerTreeItem> } {
 	const provider = new ProjectTreeDataProvider();
-	context.subscriptions.push(
-		vscode.window.createTreeView('boundingBoxEditor.projectView', { treeDataProvider: provider }),
-	);
+	const treeView = vscode.window.createTreeView('boundingBoxEditor.projectView', { treeDataProvider: provider });
+	context.subscriptions.push(treeView);
+
+	if (onSelectionChange) {
+		context.subscriptions.push(
+			treeView.onDidChangeSelection((e) => {
+				const sel = e.selection[0];
+				if (!sel) {
+					onSelectionChange(undefined);
+					return;
+				}
+				if (sel instanceof ProjectTreeItem) {
+					onSelectionChange(sel.imageUri);
+				} else if (sel instanceof BoundingBoxesGroupItem) {
+					onSelectionChange(sel.imageUri);
+				} else if (sel instanceof BoxTreeItem) {
+					onSelectionChange(sel.imageUri);
+				} else {
+					onSelectionChange(undefined);
+				}
+			}),
+		);
+	}
+
 	context.subscriptions.push(onSettingsChanged(() => provider.refresh()));
 
 	context.subscriptions.push(
@@ -160,6 +184,8 @@ export function registerExplorer(context: vscode.ExtensionContext): void {
 			vscode.commands.executeCommand('vscode.openWith', imageUri, 'boundingBoxEditor.imageEditor');
 		}),
 	);
+
+	return { provider, treeView };
 }
 
 export { OPEN_IMAGE_WITH_BOX_COMMAND, SELECTED_BOX_STATE_PREFIX };

@@ -38,4 +38,12 @@ suite('editorProvider', () => {
 		assert.ok(html.includes('hitTestEdgeOrBody'));
 		assert.ok(html.includes('save'));
 	});
+
+	test('getWebviewHtml includes draw-new-box behavior (bbox-preview and drawStart)', () => {
+		const html = getWebviewHtml('x', [], 'y', 'coco');
+		assert.ok(html.includes('bbox-preview'), 'script should render preview rect class');
+		assert.ok(html.includes('drawStart'), 'script should track draw start');
+		assert.ok(html.includes('drawCurrent'), 'script should track draw current');
+		assert.ok(html.includes('MIN_DRAW_PIXELS'), 'script should enforce minimum draw size');
+	});
 });

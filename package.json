@@ -2,7 +2,7 @@
   "name": "bounding-box-editor",
   "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.2",
+  "version": "0.0.5",
   "publisher": "wisefox",
   "engines": {
     "vscode": "^1.108.1"
@@ -11,7 +11,9 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:boundingBoxEditor.projectView",
+    "onView:boundingBoxEditor.bboxSectionView",
     "onCustomEditor:boundingBoxEditor.imageEditor"
   ],
   "main": "./dist/extension.js",
@@ -30,6 +32,11 @@
         {
           "id": "boundingBoxEditor.projectView",
           "name": "Project",
+          "type": "tree"
+        },
+        {
+          "id": "boundingBoxEditor.bboxSectionView",
+          "name": "Bounding Boxes",
           "type": "tree"
         }
       ]
@@ -73,8 +80,22 @@
       {
         "command": "bounding-box-editor.openImageWithBox",
         "title": "Open and select box"
+      },
+      {
+        "command": "bounding-box-editor.createNewBbox",
+        "title": "Create new bounding box",
+        "icon": "$(add)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "bounding-box-editor.createNewBbox",
+          "when": "view == boundingBoxEditor.bboxSectionView",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

@@ -4,6 +4,13 @@ import type { Bbox } from './bbox';
 import { parseBbox, serializeBbox } from './bbox';
 import { SELECTED_BOX_STATE_PREFIX } from './explorer';
 
+export const ADD_BOX_ON_OPEN_PREFIX = 'addBoxOnOpen_';
+
+export interface BoundingBoxEditorProviderOptions {
+	onBboxSaved?: (imageUri: vscode.Uri) => void;
+	onEditorOpened?: (imageUri: vscode.Uri) => void;
+}
+
 class BoundingBoxDocument implements vscode.CustomDocument {
 	constructor(
 		public readonly uri: vscode.Uri,
@@ -28,7 +35,10 @@ function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
 }
 
 export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorProvider<BoundingBoxDocument> {
-	constructor(private readonly _context: vscode.ExtensionContext) {}
+	constructor(
+		private readonly _context: vscode.ExtensionContext,
+		private readonly _options: BoundingBoxEditorProviderOptions = {},
+	) {}
 
 	async openCustomDocument(
 		uri: vscode.Uri,
@@ -54,6 +64,8 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		webviewPanel: vscode.WebviewPanel,
 		_token: vscode.CancellationToken,
 	): Promise<void> {
+		this._options.onEditorOpened?.(document.uri);
+
 		webviewPanel.webview.options = {
 			enableScripts: true,
 			localResourceRoots: [vscode.Uri.joinPath(document.uri, '..')],
@@ -87,6 +99,11 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 					document.boxes = parseBbox(document.bboxContent, 'yolo', document.imgWidth, document.imgHeight);
 					webviewPanel.webview.postMessage({ type: 'boxes', boxes: document.boxes });
 				}
+				const addBoxKey = ADD_BOX_ON_OPEN_PREFIX + document.uri.toString();
+				if (this._context.workspaceState.get<boolean>(addBoxKey)) {
+					this._context.workspaceState.update(addBoxKey, undefined);
+					webviewPanel.webview.postMessage({ type: 'addBox' });
+				}
 				return;
 			}
 			if (msg.type === 'save' && Array.isArray(msg.boxes)) {
@@ -94,6 +111,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				const serialized = serializeBbox(msg.boxes, settings.bboxFormat, document.imgWidth, document.imgHeight);
 				await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
 				document.bboxContent = serialized;
+				this._options.onBboxSaved?.(document.uri);
 			}
 		});
 	}
@@ -133,6 +151,7 @@ export function getWebviewHtml(
 		.handle.nw { cursor: nw-resize; }
 		.handle.se { cursor: se-resize; }
 		.handle.sw { cursor: sw-resize; }
+		.bbox-preview { fill: none; stroke: #ff0; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
 	</style>
 </head>
 <body>
@@ -149,7 +168,10 @@ export function getWebviewHtml(
 		let selectedBoxIndex = ${initialSelected};
 		const HANDLE_SIZE = 8;
 		const HIT_MARGIN = 6;
+		const MIN_DRAW_PIXELS = 5;
 		let drag = null;
+		let drawStart = null;
+		let drawCurrent = null;
 
 		function escapeHtml(s) {
 			if (typeof s !== 'string') return '';
@@ -186,6 +208,15 @@ export function getWebviewHtml(
 				handles.forEach(function(h) {
 					html += '<rect class="handle ' + h.c + '" data-handle="' + h.id + '" data-i="' + selectedBoxIndex + '" x="' + h.x + '" y="' + h.y + '" width="' + h.w + '" height="' + h.h + '"/>';
 				});
+			}
+			if (drawStart !== null && drawCurrent !== null && imgWidth > 0 && imgHeight > 0) {
+				const x_min = Math.max(0, Math.min(drawStart.x, drawCurrent.x));
+				const x_max = Math.min(imgWidth, Math.max(drawStart.x, drawCurrent.x));
+				const y_min = Math.max(0, Math.min(drawStart.y, drawCurrent.y));
+				const y_max = Math.min(imgHeight, Math.max(drawStart.y, drawCurrent.y));
+				const pw = x_max - x_min, ph = y_max - y_min;
+				const px = x_min * scaleX, py = y_min * scaleY, pwb = pw * scaleX, phb = ph * scaleY;
+				html += '<rect class="bbox-preview" x="' + px + '" y="' + py + '" width="' + pwb + '" height="' + phb + '"/>';
 			}
 			svg.innerHTML = html;
 		}
@@ -283,11 +314,26 @@ export function getWebviewHtml(
 				e.preventDefault();
 			} else {
 				selectedBoxIndex = null;
+				if (imgWidth > 0 && imgHeight > 0) {
+					drawStart = svgCoordsToImage(e);
+					drawCurrent = null;
+				}
 				draw();
 			}
 		});
 
 		window.addEventListener('mousemove', function(e) {
+			if (drawStart !== null) {
+				if (imgWidth > 0 && imgHeight > 0) {
+					const pos = svgCoordsToImage(e);
+					drawCurrent = {
+						x: Math.max(0, Math.min(imgWidth, pos.x)),
+						y: Math.max(0, Math.min(imgHeight, pos.y))
+					};
+				}
+				draw();
+				return;
+			}
 			if (!drag) return;
 			const pos = svgCoordsToImage(e);
 			applyResize(drag.boxIndex, drag.handle, { x: drag.startX, y: drag.startY }, pos, drag.startBox);
@@ -295,9 +341,29 @@ export function getWebviewHtml(
 		});
 
 		window.addEventListener('mouseup', function(e) {
-			if (e.button !== 0 || !drag) return;
-			drag = null;
-			vscode.postMessage({ type: 'save', boxes: boxes });
+			if (e.button !== 0) return;
+			if (drag) {
+				drag = null;
+				vscode.postMessage({ type: 'save', boxes: boxes });
+				return;
+			}
+			if (drawStart !== null) {
+				const cur = drawCurrent !== null ? drawCurrent : drawStart;
+				const x_min = Math.max(0, Math.min(drawStart.x, cur.x));
+				const x_max = Math.min(imgWidth, Math.max(drawStart.x, cur.x));
+				const y_min = Math.max(0, Math.min(drawStart.y, cur.y));
+				const y_max = Math.min(imgHeight, Math.max(drawStart.y, cur.y));
+				const width = x_max - x_min, height = y_max - y_min;
+				drawStart = null;
+				drawCurrent = null;
+				draw();
+				if (imgWidth > 0 && imgHeight > 0 && width >= MIN_DRAW_PIXELS && height >= MIN_DRAW_PIXELS) {
+					boxes.push({ x_min, y_min, width, height });
+					selectedBoxIndex = boxes.length - 1;
+					draw();
+					vscode.postMessage({ type: 'save', boxes: boxes });
+				}
+			}
 		});
 
 		img.onload = function() {
@@ -311,6 +377,18 @@ export function getWebviewHtml(
 			const d = e.data;
 			if (d && d.type === 'boxes') { boxes = d.boxes || []; draw(); }
 			if (d && d.type === 'selectedBoxIndex') { selectedBoxIndex = d.selectedBoxIndex; draw(); }
+			if (d && d.type === 'addBox') {
+				if (imgWidth > 0 && imgHeight > 0) {
+					const w = Math.max(50, Math.floor(imgWidth * 0.1));
+					const h = Math.max(50, Math.floor(imgHeight * 0.1));
+					const x_min = Math.max(0, Math.floor((imgWidth - w) / 2));
+					const y_min = Math.max(0, Math.floor((imgHeight - h) / 2));
+					boxes.push({ x_min, y_min, width: w, height: h });
+					selectedBoxIndex = boxes.length - 1;
+					draw();
+					vscode.postMessage({ type: 'save', boxes });
+				}
+			}
 		});
 
 		svg.addEventListener('dblclick', function(e) {

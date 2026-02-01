@@ -38,6 +38,17 @@ export function getBboxExtension(): string {
 	return '.txt';
 }
 
+export function getBboxUriForImage(
+	workspaceFolder: vscode.WorkspaceFolder,
+	imageUri: vscode.Uri,
+	scope?: vscode.ConfigurationScope,
+): vscode.Uri {
+	const bboxDir = getBboxDirUri(workspaceFolder, scope);
+	const base = imageUri.path.replace(/\.[^/.]+$/, '');
+	const baseName = base.split('/').pop() ?? '';
+	return vscode.Uri.joinPath(bboxDir, baseName + getBboxExtension());
+}
+
 export function onSettingsChanged(callback: () => void): vscode.Disposable {
 	return vscode.workspace.onDidChangeConfiguration((e) => {
 		if (e.affectsConfiguration(SECTION)) {
