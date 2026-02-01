@@ -12,6 +12,10 @@ A Visual Studio Code extension for viewing and editing bounding box annotations 
 - **Configurable paths**: Use VS Code settings (user or workspace) to set where images and bounding box files live; boxes are matched to images by file name.
 - **Bounding box format**: Default format is COCO (`x_min y_min width height` in pixels). You can switch to other formats (e.g. YOLO, Pascal VOC) via settings.
 
+## Screenshots
+
+![](./assets/sample.png)
+
 ## Requirements
 
 - VS Code `^1.108.1`
