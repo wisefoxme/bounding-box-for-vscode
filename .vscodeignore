@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 out/**
+coverage/**
 node_modules/**
 src/**
 .gitignore
@@ -12,3 +13,4 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+.cursor/**

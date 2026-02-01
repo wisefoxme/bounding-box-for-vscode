@@ -1,0 +1,144 @@
+import type { BboxFormat } from './settings';
+
+export interface Bbox {
+	x_min: number;
+	y_min: number;
+	width: number;
+	height: number;
+	/** Optional label/class (e.g. for COCO/YOLO). */
+	label?: string;
+}
+
+/** COCO: x_min y_min width height [label]. One line per box. */
+export function parseCoco(content: string): Bbox[] {
+	const lines = content.trim().split(/\r?\n/).filter(Boolean);
+	const boxes: Bbox[] = [];
+	for (const line of lines) {
+		const parts = line.trim().split(/\s+/);
+		if (parts.length >= 4) {
+			const x_min = Number(parts[0]);
+			const y_min = Number(parts[1]);
+			const width = Number(parts[2]);
+			const height = Number(parts[3]);
+			if (Number.isFinite(x_min) && Number.isFinite(y_min) && Number.isFinite(width) && Number.isFinite(height)) {
+				boxes.push({
+					x_min,
+					y_min,
+					width,
+					height,
+					label: parts.length > 4 ? parts.slice(4).join(' ') : undefined,
+				});
+			}
+		}
+	}
+	return boxes;
+}
+
+export function serializeCoco(boxes: Bbox[]): string {
+	return boxes
+		.map((b) => (b.label !== undefined && b.label !== null ? `${b.x_min} ${b.y_min} ${b.width} ${b.height} ${b.label}` : `${b.x_min} ${b.y_min} ${b.width} ${b.height}`))
+		.join('\n') + (boxes.length ? '\n' : '');
+}
+
+/** YOLO: class x_center y_center width height (normalized 0-1). */
+export function parseYolo(content: string, imgWidth: number, imgHeight: number): Bbox[] {
+	const lines = content.trim().split(/\r?\n/).filter(Boolean);
+	const boxes: Bbox[] = [];
+	for (const line of lines) {
+		const parts = line.trim().split(/\s+/);
+		if (parts.length >= 5 && imgWidth > 0 && imgHeight > 0) {
+			const cls = parts[0];
+			const x_center = Number(parts[1]) * imgWidth;
+			const y_center = Number(parts[2]) * imgHeight;
+			const w = Number(parts[3]) * imgWidth;
+			const h = Number(parts[4]) * imgHeight;
+			if (Number.isFinite(x_center) && Number.isFinite(y_center) && Number.isFinite(w) && Number.isFinite(h)) {
+				boxes.push({
+					x_min: x_center - w / 2,
+					y_min: y_center - h / 2,
+					width: w,
+					height: h,
+					label: cls,
+				});
+			}
+		}
+	}
+	return boxes;
+}
+
+export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number): string {
+	if (imgWidth <= 0 || imgHeight <= 0) {
+		return '';
+	}
+	return boxes
+		.map((b) => {
+			const x_center = (b.x_min + b.width / 2) / imgWidth;
+			const y_center = (b.y_min + b.height / 2) / imgHeight;
+			const w = b.width / imgWidth;
+			const h = b.height / imgHeight;
+			const cls = b.label ?? '0';
+			return `${cls} ${x_center} ${y_center} ${w} ${h}`;
+		})
+		.join('\n') + (boxes.length ? '\n' : '');
+}
+
+/** Pascal VOC: x_min y_min x_max y_max [label]. */
+export function parsePascalVoc(content: string): Bbox[] {
+	const lines = content.trim().split(/\r?\n/).filter(Boolean);
+	const boxes: Bbox[] = [];
+	for (const line of lines) {
+		const parts = line.trim().split(/\s+/);
+		if (parts.length >= 4) {
+			const x_min = Number(parts[0]);
+			const y_min = Number(parts[1]);
+			const x_max = Number(parts[2]);
+			const y_max = Number(parts[3]);
+			if (Number.isFinite(x_min) && Number.isFinite(y_min) && Number.isFinite(x_max) && Number.isFinite(y_max)) {
+				boxes.push({
+					x_min,
+					y_min,
+					width: Math.max(0, x_max - x_min),
+					height: Math.max(0, y_max - y_min),
+					label: parts.length > 4 ? parts.slice(4).join(' ') : undefined,
+				});
+			}
+		}
+	}
+	return boxes;
+}
+
+export function serializePascalVoc(boxes: Bbox[]): string {
+	return boxes
+		.map((b) => {
+			const x_max = b.x_min + b.width;
+			const y_max = b.y_min + b.height;
+			return (b.label !== undefined && b.label !== null ? `${b.x_min} ${b.y_min} ${x_max} ${y_max} ${b.label}` : `${b.x_min} ${b.y_min} ${x_max} ${y_max}`);
+		})
+		.join('\n') + (boxes.length ? '\n' : '');
+}
+
+export function parseBbox(content: string, format: BboxFormat, imgWidth: number, imgHeight: number): Bbox[] {
+	switch (format) {
+		case 'coco':
+			return parseCoco(content);
+		case 'yolo':
+			return parseYolo(content, imgWidth, imgHeight);
+		case 'pascal_voc':
+			return parsePascalVoc(content);
+		default:
+			return parseCoco(content);
+	}
+}
+
+export function serializeBbox(boxes: Bbox[], format: BboxFormat, imgWidth: number, imgHeight: number): string {
+	switch (format) {
+		case 'coco':
+			return serializeCoco(boxes);
+		case 'yolo':
+			return serializeYolo(boxes, imgWidth, imgHeight);
+		case 'pascal_voc':
+			return serializePascalVoc(boxes);
+		default:
+			return serializeCoco(boxes);
+	}
+}

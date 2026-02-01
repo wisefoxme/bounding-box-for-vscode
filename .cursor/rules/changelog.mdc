@@ -1,0 +1,45 @@
+---
+description: Maintain CHANGELOG.md according to Keep a Changelog
+globs: CHANGELOG.md
+alwaysApply: true
+---
+
+# Changelog (Keep a Changelog)
+
+Maintain [CHANGELOG.md](CHANGELOG.md) per [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## Format
+
+- **File**: `CHANGELOG.md` in the project root.
+- **Header**: State that notable changes are documented here, and that the format is based on Keep a Changelog (and optionally [Semantic Versioning](https://semver.org/)).
+- **Order**: Latest version first. Keep an `## [Unreleased]` section at the top for changes not yet released.
+- **Versions**: Use `## [X.Y.Z] - YYYY-MM-DD` (ISO 8601). Example: `## [1.2.0] - 2025-02-01`.
+- **Change types** (use only sections that have entries; omit empty ones):
+  - `### Added` — new features
+  - `### Changed` — changes in existing behavior
+  - `### Deprecated` — soon-to-be removed
+  - `### Removed` — removed features
+  - `### Fixed` — bug fixes
+  - `### Security` — vulnerabilities
+
+## When to update
+
+- When adding or removing a feature: add an entry under `## [Unreleased]` in the appropriate type (`### Added`, `### Removed`, etc.).
+- When fixing a bug: add under `### Fixed` in `[Unreleased]`.
+- At release: turn `[Unreleased]` into a versioned section (e.g. `## [1.0.0] - 2025-02-01`) and leave a new empty `## [Unreleased]` at the top.
+
+## Example (Unreleased)
+
+```markdown
+## [Unreleased]
+### Added
+- Support for COCO format import.
+### Fixed
+- Bounding box coordinates when image is scaled.
+```
+
+## Don’t
+
+- Don’t use raw git log dumps as the changelog.
+- Don’t use ambiguous dates (prefer `YYYY-MM-DD`).
+- Don’t leave important deprecations or removals out of the changelog.

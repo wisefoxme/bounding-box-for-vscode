@@ -1,23 +1,238 @@
 {
-  "name": "Bonding Box Editor",
-  "displayName": "bounding-box-editor",
+  "name": "bounding-box-editor",
+  "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.1",
+  "version": "0.0.21",
+  "publisher": "wisefox",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wisefoxme/bounding-box-for-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/wisefoxme/bounding-box-for-vscode/issues"
+  },
+  "homepage": "https://github.com/wisefoxme/bounding-box-for-vscode",
+  "keywords": [
+    "vscode",
+    "extension",
+    "bounding box",
+    "editor",
+    "image",
+    "annotation",
+    "labeling",
+    "object detection",
+    "image segmentation",
+    "image classification"
+  ],
+  "license": "BSD-3-Clause",
+  "author": {
+    "name": "Renato Oliveira"
+  },
   "engines": {
     "vscode": "^1.108.1"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:boundingBoxEditor.projectView",
+    "onView:boundingBoxEditor.bboxSectionView",
+    "onCustomEditor:boundingBoxEditor.imageEditor"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "boundingBoxEditor",
+          "title": "Bounding Box Editor",
+          "icon": "$(preview)"
+        }
+      ]
+    },
+    "views": {
+      "boundingBoxEditor": [
+        {
+          "id": "boundingBoxEditor.projectView",
+          "name": "Project",
+          "type": "tree"
+        },
+        {
+          "id": "boundingBoxEditor.bboxSectionView",
+          "name": "Bounding Boxes",
+          "type": "tree"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Bounding Box Editor",
+      "properties": {
+        "boundingBoxEditor.imageDirectory": {
+          "type": "string",
+          "default": ".",
+          "description": "Path relative to workspace root where image files are located."
+        },
+        "boundingBoxEditor.bboxDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Path relative to workspace root where bounding box files are located. Empty means next to each image (same directory as the image)."
+        },
+        "boundingBoxEditor.bboxFormat": {
+          "type": "string",
+          "enum": ["coco", "yolo", "pascal_voc"],
+          "default": "coco",
+          "description": "Bounding box file format: coco (x_min y_min width height), yolo (normalized), pascal_voc (x_min y_min x_max y_max)."
+        },
+        "boundingBoxEditor.allowedBoundingBoxFileExtensions": {
+          "type": "array",
+          "default": [".txt"],
+          "description": "File extensions for bounding box text files that share the image base name. Empty or \"*\" means read all same-base-name files; otherwise only listed extensions (e.g. \".box\" only reads *.box). Saving and commands use a single primary file (first existing or default path with first extension).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "boundingBoxEditor.defaultBoundingBoxes": {
+          "type": "array",
+          "default": [],
+          "description": "Default bounding boxes (x, y, w, h) applied when opening an image that has no bounding box file or empty boxes. Empty or invalid list means no boxes are added.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "w": { "type": "number" },
+              "h": { "type": "number" },
+              "label": { "type": "string" }
+            },
+            "required": ["x", "y", "w", "h"]
+          }
+        }
+      }
+    },
+    "customEditors": [
+      {
+        "viewType": "boundingBoxEditor.imageEditor",
+        "displayName": "Bounding Box Editor",
+        "selector": [
+          { "filenamePattern": "*.{png,jpg,jpeg,gif,webp}" }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "bounding-box-editor.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "bounding-box-editor.openImageWithBox",
+        "title": "Open and select box"
+      },
+      {
+        "command": "bounding-box-editor.removeAllBoxes",
+        "title": "Remove all boxes",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "bounding-box-editor.removeBox",
+        "title": "Remove box",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "bounding-box-editor.removeSelectedBoxes",
+        "title": "Remove selected bounding boxes",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "bounding-box-editor.renameBox",
+        "title": "Rename box",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "bounding-box-editor.renameBoundingBox",
+        "title": "Rename bounding box"
+      },
+      {
+        "command": "bounding-box-editor.removeBoundingBox",
+        "title": "Remove bounding box"
+      },
+      {
+        "command": "bounding-box-editor.revealBboxFile",
+        "title": "Reveal in file explorer",
+        "icon": "$(go-to-file)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "bounding-box-editor.removeBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "navigation"
+        },
+        {
+          "command": "bounding-box-editor.removeSelectedBoxes",
+          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "navigation"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "bounding-box-editor.removeAllBoxes",
+          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.removeBox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.revealBboxFile",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.removeBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.revealBboxFile",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "bounding-box-editor.renameBoundingBox",
+          "when": "boundingBoxEditor.hasBoxSelected"
+        },
+        {
+          "command": "bounding-box-editor.removeBoundingBox",
+          "when": "boundingBoxEditor.hasBoxSelected"
+        },
+        {
+          "command": "bounding-box-editor.revealBboxFile",
+          "when": "boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -31,7 +246,8 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:coverage": "vscode-test --coverage --coverage-output ./coverage --coverage-reporter text-summary --coverage-reporter lcov"
   },
   "devDependencies": {
     "@types/vscode": "^1.108.1",

@@ -1,0 +1,10 @@
+---
+description: Document library and framework quirks and workarounds
+alwaysApply: true
+---
+
+# Documentation of Quirks
+
+- When a **workaround** is added for a library or framework quirk (e.g. Webview, VS Code API, or test runner), it must be documented.
+- **Where**: In this project, use the main [README.md](README.md). Add a short "Quirks and workarounds" subsection under Known Issues or a dedicated section, with the library name, the problematic behavior, and the workaround.
+- Do not leave workarounds only in code comments; the README is the single place for user- and contributor-visible quirk documentation.
