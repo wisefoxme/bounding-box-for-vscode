@@ -2,7 +2,7 @@
   "name": "bounding-box-editor",
   "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.19",
+  "version": "0.0.21",
   "publisher": "wisefox",
   "engines": {
     "vscode": "^1.108.1"
@@ -59,6 +59,14 @@
           "enum": ["coco", "yolo", "pascal_voc"],
           "default": "coco",
           "description": "Bounding box file format: coco (x_min y_min width height), yolo (normalized), pascal_voc (x_min y_min x_max y_max)."
+        },
+        "boundingBoxEditor.allowedBoundingBoxFileExtensions": {
+          "type": "array",
+          "default": [".txt"],
+          "description": "File extensions for bounding box text files that share the image base name. Empty or \"*\" means read all same-base-name files; otherwise only listed extensions (e.g. \".box\" only reads *.box). Saving and commands use a single primary file (first existing or default path with first extension).",
+          "items": {
+            "type": "string"
+          }
         },
         "boundingBoxEditor.defaultBoundingBoxes": {
           "type": "array",

@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { getBboxUriForImage, getBboxExtension, getDefaultBoundingBoxes, getSettings } from './settings';
+import { getBboxUriForImage, getBboxExtension, getDefaultBoundingBoxes, getSettings, readMergedBboxContent } from './settings';
 import type { Bbox } from './bbox';
-import { parseBbox, serializeBbox } from './bbox';
+import { getProviderForImage, getProvider } from './formatProviders';
+import type { BboxFormatProvider } from './formatProviders';
 import { SELECTED_BOX_STATE_PREFIX } from './explorer';
 
 export const ADD_BOX_ON_OPEN_PREFIX = 'addBoxOnOpen_';
@@ -21,6 +22,7 @@ class BoundingBoxDocument implements vscode.CustomDocument {
 		public boxes: Bbox[],
 		public imgWidth: number,
 		public imgHeight: number,
+		public readonly formatProvider: BboxFormatProvider,
 	) {}
 	dispose(): void {}
 }
@@ -57,17 +59,32 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		_openContext: vscode.CustomDocumentOpenContext,
 		_token: vscode.CancellationToken,
 	): Promise<BoundingBoxDocument> {
-		const bboxUri = resolveBboxUri(uri) ?? vscode.Uri.joinPath(uri, '..', uri.path.split('/').pop()!.replace(/\.[^/.]+$/, '') + getBboxExtension());
-		let bboxContent = '';
-		try {
-			const buf = await vscode.workspace.fs.readFile(bboxUri);
-			bboxContent = new TextDecoder().decode(buf);
-		} catch {
-			// no bbox file yet; leave bboxContent empty
+		const folder = vscode.workspace.getWorkspaceFolder(uri);
+		let bboxUri: vscode.Uri;
+		let bboxContent: string;
+		let boxes: Bbox[];
+		let formatProvider: BboxFormatProvider;
+
+		if (folder) {
+			const merged = await readMergedBboxContent(folder, uri);
+			bboxUri = merged.primaryUri;
+			bboxContent = merged.content;
+			boxes = merged.boxes;
+			formatProvider = getProviderForImage(uri) ?? getProvider(getSettings().bboxFormat) ?? getProvider('coco')!;
+		} else {
+			bboxUri = vscode.Uri.joinPath(uri, '..', uri.path.split('/').pop()!.replace(/\.[^/.]+$/, '') + getBboxExtension());
+			bboxContent = '';
+			try {
+				const buf = await vscode.workspace.fs.readFile(bboxUri);
+				bboxContent = new TextDecoder().decode(buf);
+			} catch {
+				// no bbox file yet; leave bboxContent empty
+			}
+			const settings = getSettings();
+			formatProvider = getProvider(settings.bboxFormat) ?? getProvider('coco')!;
+			boxes = formatProvider.parse(bboxContent, 0, 0);
 		}
-		const settings = getSettings();
-		// Image dimensions unknown until webview loads; use 0 for non-YOLO
-		let boxes = parseBbox(bboxContent, settings.bboxFormat, 0, 0);
+
 		if (boxes.length === 0) {
 			const scope = vscode.workspace.getWorkspaceFolder(uri);
 			const defaults = getDefaultBoundingBoxes(scope);
@@ -75,7 +92,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				boxes = defaults;
 			}
 		}
-		return new BoundingBoxDocument(uri, bboxUri, bboxContent, boxes, 0, 0);
+		return new BoundingBoxDocument(uri, bboxUri, bboxContent, boxes, 0, 0, formatProvider);
 	}
 
 	async resolveCustomEditor(
@@ -98,6 +115,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		const imageSrc = webviewPanel.webview.asWebviewUri(document.uri);
 		const settings = getSettings();
 		const initialBoxes = document.boxes;
+		const formatProvider = document.formatProvider;
 		const stateKey = SELECTED_BOX_STATE_PREFIX + document.uri.toString();
 		const storedIndex = this._context.workspaceState.get<number>(stateKey);
 		const initialSelectedIndices: number[] = storedIndex !== undefined ? [storedIndex] : [];
@@ -110,7 +128,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				imageSrc.toString(),
 				initialBoxes,
 				document.bboxUri.toString(),
-				settings.bboxFormat,
+				formatProvider.id,
 				initialSelectedIndices,
 			);
 		};
@@ -122,8 +140,12 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 					document.imgWidth = msg.imgWidth;
 					document.imgHeight = msg.imgHeight;
 					// Re-parse if YOLO (needs dimensions)
-					if (settings.bboxFormat === 'yolo' && document.bboxContent) {
-						document.boxes = parseBbox(document.bboxContent, 'yolo', document.imgWidth, document.imgHeight);
+					if (document.formatProvider.id === 'yolo' && document.bboxContent) {
+						document.boxes = document.formatProvider.parse(
+							document.bboxContent,
+							document.imgWidth,
+							document.imgHeight,
+						);
 						webviewPanel.webview.postMessage({ type: 'boxes', boxes: document.boxes });
 					}
 					const addBoxKey = ADD_BOX_ON_OPEN_PREFIX + document.uri.toString();
@@ -135,7 +157,11 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				}
 				if (msg.type === 'save' && Array.isArray(msg.boxes)) {
 					document.boxes = msg.boxes;
-					const serialized = serializeBbox(msg.boxes, settings.bboxFormat, document.imgWidth, document.imgHeight);
+					const serialized = document.formatProvider.serialize(
+						msg.boxes,
+						document.imgWidth,
+						document.imgHeight,
+					);
 					await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
 					document.bboxContent = serialized;
 					this._options.onBboxSaved?.(document.uri);

@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
-import { getImageDirUri, getBboxUriForImage, getBboxExtension, onSettingsChanged, getSettings } from './settings';
-import { parseBbox } from './bbox';
-import type { Bbox } from './bbox';
+import { getImageDirUri, getBboxUriForImage, getBboxCandidateUris, onSettingsChanged, getSettings, readMergedBboxContent } from './settings';
 import { setSelectedBoxIndex, getSelectedBoxIndices } from './selectedImage';
 
 const IMAGE_GLOB = '**/*.{png,jpg,jpeg,gif,webp}';
@@ -115,15 +113,18 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 				const pattern = new vscode.RelativePattern(imageDir, IMAGE_GLOB);
 				const imageUris = await vscode.workspace.findFiles(pattern, null, 1000);
 				for (const imageUri of imageUris) {
-					const bboxUri = getBboxUriForImage(folder, imageUri);
-					let bboxExists: boolean;
-					try {
-						await vscode.workspace.fs.stat(bboxUri);
-						bboxExists = true;
-					} catch {
-						bboxExists = false;
+					const candidates = await getBboxCandidateUris(folder, imageUri);
+					let primary: vscode.Uri | undefined;
+					for (const u of candidates) {
+						try {
+							await vscode.workspace.fs.stat(u);
+							primary = u;
+							break;
+						} catch {
+							// continue
+						}
 					}
-					items.push(new ProjectTreeItem(imageUri, bboxExists ? bboxUri : undefined, folder));
+					items.push(new ProjectTreeItem(imageUri, primary, folder));
 				}
 			}
 			return items.sort((a, b) => a.imageUri.fsPath.localeCompare(b.imageUri.fsPath));
@@ -137,26 +138,17 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 		}
 
 		if (isBoundingBoxesGroupItem(element)) {
-			let content: string;
-			try {
-				const buf = await vscode.workspace.fs.readFile(element.bboxUri);
-				content = new TextDecoder().decode(buf);
-			} catch {
-				return [];
-			}
-			const settings = getSettings();
+			const merged = await readMergedBboxContent(element.workspaceFolder, element.imageUri);
+			const boxes = merged.boxes;
 			const selectedIndices = getSelectedBoxIndices();
-			if (settings.bboxFormat === 'yolo') {
-				const lines = content.trim().split(/\r?\n/).filter(Boolean);
-				return lines.map(
-					(_, i) =>
-						new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`, {
-							selected: selectedIndices.includes(i),
-							parent: element,
-						}),
+			if (getSettings().bboxFormat === 'yolo') {
+				return boxes.map((_, i) =>
+					new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`, {
+						selected: selectedIndices.includes(i),
+						parent: element,
+					}),
 				);
 			}
-			const boxes = parseBbox(content, settings.bboxFormat, 0, 0);
 			return boxes.map((b, i) => {
 				const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;
 				const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;

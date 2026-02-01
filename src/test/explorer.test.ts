@@ -105,8 +105,9 @@ suite('explorer', () => {
 			return;
 		}
 		const folder = folders[0];
-		const bboxUri = vscode.Uri.joinPath(folder.uri, `test-explorer-${Date.now()}.txt`);
-		const imageUri = vscode.Uri.joinPath(folder.uri, 'test-explorer-image.png');
+		const base = `test-explorer-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
 		try {
 			await vscode.workspace.fs.writeFile(
 				bboxUri,

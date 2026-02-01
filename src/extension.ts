@@ -9,7 +9,7 @@ import {
 	getSelectedBoxIndices,
 } from './selectedImage';
 import { getBboxUriForImage, getSettings } from './settings';
-import { parseBbox, serializeBbox } from './bbox';
+import { getProviderForImage, getProvider } from './formatProviders';
 import type { Bbox } from './bbox';
 import {
 	ProjectTreeItem,
@@ -161,7 +161,9 @@ export function activate(context: vscode.ExtensionContext) {
 		const folder = vscode.workspace.getWorkspaceFolder(imageUri);
 		if (!folder) {return;}
 		const settings = getSettings();
-		if (settings.bboxFormat === 'yolo' && !editorProvider.hasEditorOpen(imageUri)) {
+		const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
+		if (!provider) {return;}
+		if (provider.id === 'yolo' && !editorProvider.hasEditorOpen(imageUri)) {
 			void vscode.window.showInformationMessage(
 				'Open the image in the Bounding Box Editor to remove boxes (YOLO format requires image dimensions).',
 			);
@@ -178,12 +180,12 @@ export function activate(context: vscode.ExtensionContext) {
 		} catch {
 			return;
 		}
-		const boxes = parseBbox(content, settings.bboxFormat, 0, 0);
+		const boxes = provider.parse(content, 0, 0);
 		const sortedIndices = [...indices].sort((a, b) => b - a).filter((i) => i >= 0 && i < boxes.length);
 		for (const i of sortedIndices) {
 			boxes.splice(i, 1);
 		}
-		const serialized = serializeBbox(boxes, settings.bboxFormat, 0, 0);
+		const serialized = provider.serialize(boxes, 0, 0);
 		await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(serialized));
 		refreshTrees();
 	}
@@ -200,11 +202,13 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!folder) {return;}
 		const bboxUri = getBboxUriForImage(folder, imageUri);
 		const settings = getSettings();
+		const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
+		if (!provider) {return;}
 		let currentLabel = `Box ${bboxIndex + 1}`;
-		if (settings.bboxFormat !== 'yolo') {
+		if (provider.id !== 'yolo') {
 			try {
 				const content = new TextDecoder().decode(await vscode.workspace.fs.readFile(bboxUri));
-				const boxes = parseBbox(content, settings.bboxFormat, 0, 0);
+				const boxes = provider.parse(content, 0, 0);
 				if (bboxIndex >= 0 && bboxIndex < boxes.length) {
 					currentLabel = boxes[bboxIndex].label ?? currentLabel;
 				}
@@ -220,12 +224,12 @@ export function activate(context: vscode.ExtensionContext) {
 			prompt: 'Enter new label for the box',
 		});
 		if (newLabel === undefined) {return;}
-		if (settings.bboxFormat === 'yolo' && editorProvider.hasEditorOpen(imageUri)) {
+		if (provider.id === 'yolo' && editorProvider.hasEditorOpen(imageUri)) {
 			editorProvider.postMessageToEditor(imageUri, { type: 'renameBoxAt', bboxIndex, label: newLabel });
 			refreshTrees();
 			return;
 		}
-		if (settings.bboxFormat === 'yolo') {
+		if (provider.id === 'yolo') {
 			void vscode.window.showInformationMessage(
 				'Open the image in the Bounding Box Editor to rename boxes (YOLO format).',
 			);
@@ -237,10 +241,10 @@ export function activate(context: vscode.ExtensionContext) {
 		} catch {
 			return;
 		}
-		const boxes = parseBbox(content, settings.bboxFormat, 0, 0);
+		const boxes = provider.parse(content, 0, 0);
 		if (bboxIndex < 0 || bboxIndex >= boxes.length) {return;}
 		boxes[bboxIndex] = { ...boxes[bboxIndex], label: newLabel };
-		const serialized = serializeBbox(boxes, settings.bboxFormat, 0, 0);
+		const serialized = provider.serialize(boxes, 0, 0);
 		await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(serialized));
 		refreshTrees();
 		editorProvider.postMessageToEditor(imageUri, { type: 'boxes', boxes });

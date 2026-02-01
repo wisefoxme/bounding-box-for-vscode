@@ -5,7 +5,9 @@ import {
 	getImageDirUri,
 	getBboxDirUri,
 	getBboxExtension,
+	getAllowedBoundingBoxFileExtensions,
 	getBboxUriForImage,
+	getBboxCandidateUris,
 	getDefaultBoundingBoxes,
 } from '../settings';
 
@@ -15,9 +17,133 @@ suite('settings', () => {
 		assert.strictEqual(typeof s.imageDirectory, 'string');
 		assert.strictEqual(typeof s.bboxDirectory, 'string');
 		assert.ok(['coco', 'yolo', 'pascal_voc'].includes(s.bboxFormat));
+		assert.ok(Array.isArray(s.allowedBoundingBoxFileExtensions));
 	});
 	test('getBboxExtension returns .txt', () => {
 		assert.strictEqual(getBboxExtension(), '.txt');
+	});
+	test('getAllowedBoundingBoxFileExtensions returns [".txt"] by default', () => {
+		const result = getAllowedBoundingBoxFileExtensions();
+		assert.deepStrictEqual(result, ['.txt']);
+	});
+	test('getAllowedBoundingBoxFileExtensions normalizes "box" to ".box"', async () => {
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', ['box', '.txt'], vscode.ConfigurationTarget.Global);
+		try {
+			const result = getAllowedBoundingBoxFileExtensions();
+			assert.deepStrictEqual(result, ['.box', '.txt']);
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+		}
+	});
+	test('getAllowedBoundingBoxFileExtensions returns empty array when config is []', async () => {
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', [], vscode.ConfigurationTarget.Global);
+		try {
+			const result = getAllowedBoundingBoxFileExtensions();
+			assert.deepStrictEqual(result, []);
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+		}
+	});
+	test('getAllowedBoundingBoxFileExtensions preserves "*"', async () => {
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', ['*', '.txt'], vscode.ConfigurationTarget.Global);
+		try {
+			const result = getAllowedBoundingBoxFileExtensions();
+			assert.deepStrictEqual(result, ['*', '.txt']);
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+		}
+	});
+	test('getBboxCandidateUris returns matching .txt file when allowed is [".txt"]', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', ['.txt'], vscode.ConfigurationTarget.Global);
+		const base = `test-candidate-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		try {
+			await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode('0 0 10 10'));
+			const candidates = await getBboxCandidateUris(folder, imageUri);
+			assert.strictEqual(candidates.length, 1);
+			assert.strictEqual(candidates[0].toString(), bboxUri.toString());
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.fs.delete(bboxUri);
+			} catch {
+				// ignore
+			}
+		}
+	});
+	test('getBboxCandidateUris returns empty when no matching file and allowed [".txt"]', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folder.uri, `nonexistent-${Date.now()}.png`);
+		const candidates = await getBboxCandidateUris(folder, imageUri);
+		assert.strictEqual(candidates.length, 0);
+	});
+	test('getBboxCandidateUris returns only .txt when [".txt"] and both .txt and .box exist', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', ['.txt'], vscode.ConfigurationTarget.Global);
+		const base = `test-txt-only-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const txtUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		const boxUri = vscode.Uri.joinPath(folder.uri, `${base}.box`);
+		try {
+			await vscode.workspace.fs.writeFile(txtUri, new TextEncoder().encode('0 0 10 10'));
+			await vscode.workspace.fs.writeFile(boxUri, new TextEncoder().encode('0 0 20 20'));
+			const candidates = await getBboxCandidateUris(folder, imageUri);
+			assert.strictEqual(candidates.length, 1);
+			assert.ok(candidates[0].fsPath.endsWith('.txt'));
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.fs.delete(txtUri);
+				await vscode.workspace.fs.delete(boxUri);
+			} catch {
+				// ignore
+			}
+		}
+	});
+	test('getBboxCandidateUris returns both .txt and .box when allowed [".txt", ".box"]', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', ['.txt', '.box'], vscode.ConfigurationTarget.Global);
+		const base = `test-both-ext-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const txtUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		const boxUri = vscode.Uri.joinPath(folder.uri, `${base}.box`);
+		try {
+			await vscode.workspace.fs.writeFile(txtUri, new TextEncoder().encode('0 0 10 10'));
+			await vscode.workspace.fs.writeFile(boxUri, new TextEncoder().encode('0 0 20 20'));
+			const candidates = await getBboxCandidateUris(folder, imageUri);
+			assert.strictEqual(candidates.length, 2);
+			const exts = candidates.map((u) => u.fsPath.replace(/.*\./, '.'));
+			assert.ok(exts.includes('.txt'));
+			assert.ok(exts.includes('.box'));
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.fs.delete(txtUri);
+				await vscode.workspace.fs.delete(boxUri);
+			} catch {
+				// ignore
+			}
+		}
 	});
 	test('getImageDirUri and getBboxDirUri with workspace folder', () => {
 		const folder = vscode.workspace.workspaceFolders?.[0];

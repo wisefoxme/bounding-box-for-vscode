@@ -22,11 +22,15 @@ Settings are read from the usual VS Code configuration (e.g. `.vscode/settings.j
 |--------|-------------|--------|
 | `boundingBoxEditor.imageDirectory` | Path (relative to workspace root) where image files are located. | `"."` (workspace root) |
 | `boundingBoxEditor.bboxDirectory` | Path (relative to workspace root) where bounding box text files are located. Leave empty or set equal to image directory to keep boxes next to images. | `""` (same as image directory) |
+| `boundingBoxEditor.allowedBoundingBoxFileExtensions` | File extensions for bounding box text files that share the image base name. Empty or `"*"` means read all same-base-name files; otherwise only the listed extensions (e.g. `".box"` only reads `*.box`). Saving and commands (reveal, rename, delete, etc.) use a single **primary** file: the first existing candidate or the default path with the first extension (or `.txt` when empty/`"*"`). | `[".txt"]` |
 | `boundingBoxEditor.bboxFormat` | Bounding box file format: `"coco"`, `"yolo"`, or `"pascal_voc"`. | `"coco"` |
 
 **Association**: A bounding box file is linked to an image when:
 - Its base name (without extension) matches the image file name, and
 - It lives in the configured bounding box directory (or image directory if bbox directory is not set).
+- Its extension is allowed by `boundingBoxEditor.allowedBoundingBoxFileExtensions` (empty or `"*"` = any extension).
+
+When multiple matching files exist, the extension reads them all and merges their boxes; saving and commands still target a single primary file (first existing or default path).
 
 Example: image `photos/sample.jpg` with default settings will use `photos/sample.txt` (or the path implied by `boundingBoxEditor.bboxDirectory` if set).
 
