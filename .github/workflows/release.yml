@@ -50,7 +50,7 @@ jobs:
           generate_release_notes: true
           files: bounding-box-editor-*.vsix
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
 
       - name: Publish to Marketplace
         run: npx @vscode/vsce publish -p ${{ secrets.VSCE_API_TOKEN }}
