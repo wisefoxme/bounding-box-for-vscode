@@ -2,8 +2,9 @@
   "name": "bounding-box-editor",
   "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "publisher": "wisefox",
+  "icon": "assets/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/wisefoxme/bounding-box-for-vscode"
@@ -236,6 +237,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
+    "vsce:package": "npx @vscode/vsce package",
     "compile": "npm run check-types && npm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",

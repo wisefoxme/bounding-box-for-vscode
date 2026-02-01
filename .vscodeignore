@@ -14,3 +14,5 @@ vsc-extension-quickstart.md
 **/*.ts
 **/.vscode-test.*
 .cursor/**
+assets/*
+!assets/icon.png
