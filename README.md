@@ -1,5 +1,8 @@
 # Bounding Box Editor
 
+![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)
+![Visual Studio Marketplace Last Updated](https://img.shields.io/visual-studio-marketplace/last-updated/wisefoxme.bounding-box-editor)
+
 A Visual Studio Code extension for viewing and editing bounding box annotations on images. It shows images with overlaid boxes and keeps annotations in text files that you can configure per workspace.
 
 ## Features
@@ -44,10 +47,8 @@ Example: image `photos/sample.jpg` with default settings will use `photos/sample
 
 ## Known Issues
 
-None at this time. If you hit Webview or VS Code API quirks, workarounds are documented in this README as they are added.
+None at this time. If you hit Webview or VS Code API quirks, workarounds are documented in this README as they are added. Otherwise, please report an issue on the [GitHub repository](https://github.com/wisefoxme/bounding-box-for-vscode/issues).
 
 ## Release Notes
 
-### 0.0.1
-
-Initial release: sidebar explorer, custom editor with image + bounding box overlay, configurable image/bbox paths and format (COCO default).
+See the [CHANGELOG](CHANGELOG.md) for the latest release notes.
