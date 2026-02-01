@@ -4,6 +4,30 @@
   "description": "Edit the bounding box for images from within your editor.",
   "version": "0.0.21",
   "publisher": "wisefox",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wisefoxme/bounding-box-for-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/wisefoxme/bounding-box-for-vscode/issues"
+  },
+  "homepage": "https://github.com/wisefoxme/bounding-box-for-vscode",
+  "keywords": [
+    "vscode",
+    "extension",
+    "bounding box",
+    "editor",
+    "image",
+    "annotation",
+    "labeling",
+    "object detection",
+    "image segmentation",
+    "image classification"
+  ],
+  "license": "BSD-3-Clause",
+  "author": {
+    "name": "Renato Oliveira"
+  },
   "engines": {
     "vscode": "^1.108.1"
   },
