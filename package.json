@@ -2,7 +2,7 @@
   "name": "bounding-box-editor",
   "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "publisher": "wisefox",
   "repository": {
     "type": "git",
