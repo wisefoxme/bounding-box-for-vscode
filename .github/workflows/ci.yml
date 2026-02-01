@@ -2,13 +2,21 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "esbuild.js"
+      - "tsconfig.json"
+      - ".vscodeignore"
+      - "eslint.config.mjs"
 
 jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
     env:
-      DISPLAY: ':99'
+      DISPLAY: ":99"
     steps:
       - uses: actions/checkout@v4
 
