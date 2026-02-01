@@ -56,3 +56,9 @@ jobs:
 
       - name: Publish to Marketplace
         run: npx @vscode/vsce publish -p ${{ secrets.VSCE_API_TOKEN }}
+
+      - name: Save VSIX to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bounding-box-editor-${{ steps.version.outputs.VERSION }}.vsix
+          path: bounding-box-editor-*.vsix
