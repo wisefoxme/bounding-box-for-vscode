@@ -1,0 +1,14 @@
+---
+description: VS Code extension coding standards
+globs: src/**/*.ts
+alwaysApply: false
+---
+
+# VS Code Extension Standards
+
+- Use the `vscode` API from the `vscode` module; avoid Node-only APIs for UI and file resolution when the VS Code API provides an equivalent.
+- Register disposables in `ExtensionContext.subscriptions` so they are cleaned up on deactivation.
+- Configuration: read workspace/user settings via `vscode.workspace.getConfiguration('boundingBoxEditor')`; support both user and workspace scopes (default is workspace).
+- Custom editors: implement `CustomReadonlyEditorProvider` or `CustomEditorProvider` from `vscode`; use Webview APIs for content security (CSP) and local resource roots.
+- Tree views: implement `TreeDataProvider` and use `vscode.window.createTreeView` with the view id from `package.json` contributions.
+- Do not ignore linter or TypeScript errors; fix or explicitly suppress with a short comment where necessary.

@@ -1,0 +1,12 @@
+---
+description: Mandatory unit tests and coverage for this extension
+alwaysApply: true
+---
+
+# Testing Rules
+
+- **New features**: Every new feature must have corresponding unit tests. Do not merge code that adds behavior without tests.
+- **Removed features**: When removing a feature, remove its tests and ensure the rest of the test suite still passes.
+- **Coverage**: Keep test coverage above 80% for the codebase. Run the test suite before considering work done.
+- **Test runner**: Use the existing `@vscode/test-cli` and `@vscode/test-electron` setup; run tests with `npm test`.
+- **Core logic**: Parsing, coordinate conversion, and settings resolution must have unit tests; integration tests can cover activation and commands.
