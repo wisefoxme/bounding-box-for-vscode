@@ -30,6 +30,11 @@ suite('bbox', () => {
 			assert.strictEqual(boxes.length, 1);
 			assert.strictEqual(boxes[0].label, 'person');
 		});
+		test('parseCoco preserves label with spaces', () => {
+			const boxes = parseCoco('10 20 30 40 Second Box');
+			assert.strictEqual(boxes.length, 1);
+			assert.strictEqual(boxes[0].label, 'Second Box');
+		});
 		test('parseCoco ignores invalid lines', () => {
 			const boxes = parseCoco('10 20\n1 2 3');
 			assert.strictEqual(boxes.length, 0);
@@ -97,6 +102,11 @@ suite('bbox', () => {
 			const boxes = parsePascalVoc('0 0 10 10 dog');
 			assert.strictEqual(boxes.length, 1);
 			assert.strictEqual(boxes[0].label, 'dog');
+		});
+		test('parsePascalVoc preserves label with spaces', () => {
+			const boxes = parsePascalVoc('0 0 10 10 My Label Here');
+			assert.strictEqual(boxes.length, 1);
+			assert.strictEqual(boxes[0].label, 'My Label Here');
 		});
 		test('serializePascalVoc round-trip', () => {
 			const boxes: Bbox[] = [

@@ -1,15 +1,14 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import {
-	BboxSectionTreeDataProvider,
-	CreateNewBoxItem,
-	BboxSectionPlaceholderItem,
-} from '../bboxSection';
+import { BboxSectionTreeDataProvider, BboxSectionPlaceholderItem } from '../bboxSection';
+import { BoxTreeItem } from '../explorer';
 import {
 	setSelectedImageUri,
 	getSelectedImageUri,
 	setSelectedBoxIndex,
 	getSelectedBoxIndex,
+	setSelectedBoxIndices,
+	getSelectedBoxIndices,
 } from '../selectedImage';
 
 suite('selectedImage', () => {
@@ -43,6 +42,15 @@ suite('selectedImage', () => {
 		setSelectedBoxIndex(undefined);
 		assert.strictEqual(getSelectedBoxIndex(), undefined);
 	});
+
+	test('getSelectedBoxIndices and setSelectedBoxIndices round-trip', () => {
+		setSelectedBoxIndices([]);
+		assert.deepStrictEqual(getSelectedBoxIndices(), []);
+		setSelectedBoxIndices([0, 2]);
+		assert.deepStrictEqual(getSelectedBoxIndices(), [0, 2]);
+		setSelectedBoxIndices([1]);
+		assert.strictEqual(getSelectedBoxIndex(), 1);
+	});
 });
 
 suite('bboxSection', () => {
@@ -56,7 +64,7 @@ suite('bboxSection', () => {
 		assert.strictEqual((children[0] as BboxSectionPlaceholderItem).label, 'Select an image from Project');
 	});
 
-	test('getChildren(undefined) returns only CreateNewBoxItem when image selected but no bbox file', async () => {
+	test('getChildren(undefined) returns no-boxes placeholder when image selected but no bbox file', async () => {
 		const folders = vscode.workspace.workspaceFolders;
 		if (!folders || folders.length === 0) {
 			return;
@@ -65,12 +73,15 @@ suite('bboxSection', () => {
 		setSelectedImageUri(imageUri);
 		const children = await provider.getChildren(undefined);
 		assert.strictEqual(children.length, 1);
-		assert.ok(children[0] instanceof CreateNewBoxItem);
-		assert.strictEqual((children[0] as CreateNewBoxItem).label, 'Create new bounding box');
+		assert.ok(children[0] instanceof BboxSectionPlaceholderItem);
+		assert.strictEqual(
+			(children[0] as BboxSectionPlaceholderItem).label,
+			'Open the image and draw on the canvas to add boxes',
+		);
 		setSelectedImageUri(undefined);
 	});
 
-	test('getChildren(undefined) returns CreateNewBoxItem plus box items when image has bbox file', async () => {
+	test('getChildren(undefined) returns only box items when image has bbox file', async () => {
 		const folders = vscode.workspace.workspaceFolders;
 		if (!folders || folders.length === 0) {
 			return;
@@ -86,9 +97,11 @@ suite('bboxSection', () => {
 			);
 			setSelectedImageUri(imageUri);
 			const children = await provider.getChildren(undefined);
-			assert.ok(children.length >= 3, 'CreateNewBoxItem + 2 box items');
-			assert.ok(children[0] instanceof CreateNewBoxItem);
-			assert.strictEqual((children[0] as CreateNewBoxItem).label, 'Create new bounding box');
+			assert.strictEqual(children.length, 2, '2 box items');
+			assert.ok(children[0] instanceof BoxTreeItem);
+			assert.ok(children[1] instanceof BoxTreeItem);
+			assert.strictEqual((children[0] as BoxTreeItem).label, 'label1');
+			assert.strictEqual((children[1] as BoxTreeItem).label, 'label2');
 			setSelectedImageUri(undefined);
 		} finally {
 			try {
@@ -97,18 +110,5 @@ suite('bboxSection', () => {
 				// ignore
 			}
 		}
-	});
-
-	test('CreateNewBoxItem has createNewBbox command and add icon', () => {
-		const folders = vscode.workspace.workspaceFolders;
-		if (!folders || folders.length === 0) {
-			return;
-		}
-		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'x.png');
-		const item = new CreateNewBoxItem(imageUri);
-		assert.strictEqual(item.contextValue, 'createBbox');
-		assert.ok(item.command);
-		assert.strictEqual(item.command?.command, 'bounding-box-editor.createNewBbox');
-		assert.deepStrictEqual(item.command?.arguments, [imageUri]);
 	});
 });

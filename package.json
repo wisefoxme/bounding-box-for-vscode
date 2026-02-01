@@ -2,7 +2,7 @@
   "name": "bounding-box-editor",
   "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.5",
+  "version": "0.0.19",
   "publisher": "wisefox",
   "engines": {
     "vscode": "^1.108.1"
@@ -52,13 +52,29 @@
         "boundingBoxEditor.bboxDirectory": {
           "type": "string",
           "default": "",
-          "description": "Path relative to workspace root where bounding box files are located. Empty means same as image directory."
+          "description": "Path relative to workspace root where bounding box files are located. Empty means next to each image (same directory as the image)."
         },
         "boundingBoxEditor.bboxFormat": {
           "type": "string",
           "enum": ["coco", "yolo", "pascal_voc"],
           "default": "coco",
           "description": "Bounding box file format: coco (x_min y_min width height), yolo (normalized), pascal_voc (x_min y_min x_max y_max)."
+        },
+        "boundingBoxEditor.defaultBoundingBoxes": {
+          "type": "array",
+          "default": [],
+          "description": "Default bounding boxes (x, y, w, h) applied when opening an image that has no bounding box file or empty boxes. Empty or invalid list means no boxes are added.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "w": { "type": "number" },
+              "h": { "type": "number" },
+              "label": { "type": "string" }
+            },
+            "required": ["x", "y", "w", "h"]
+          }
         }
       }
     },
@@ -82,21 +98,24 @@
         "title": "Open and select box"
       },
       {
-        "command": "bounding-box-editor.createNewBbox",
-        "title": "Create new bounding box",
-        "icon": "$(add)"
-      },
-      {
         "command": "bounding-box-editor.removeAllBoxes",
-        "title": "Remove all boxes"
+        "title": "Remove all boxes",
+        "icon": "$(trash)"
       },
       {
         "command": "bounding-box-editor.removeBox",
-        "title": "Remove box"
+        "title": "Remove box",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "bounding-box-editor.removeSelectedBoxes",
+        "title": "Remove selected bounding boxes",
+        "icon": "$(trash)"
       },
       {
         "command": "bounding-box-editor.renameBox",
-        "title": "Rename box"
+        "title": "Rename box",
+        "icon": "$(edit)"
       },
       {
         "command": "bounding-box-editor.renameBoundingBox",
@@ -105,30 +124,40 @@
       {
         "command": "bounding-box-editor.removeBoundingBox",
         "title": "Remove bounding box"
+      },
+      {
+        "command": "bounding-box-editor.revealBboxFile",
+        "title": "Reveal in file explorer",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "bounding-box-editor.createNewBbox",
-          "when": "view == boundingBoxEditor.bboxSectionView",
+          "command": "bounding-box-editor.removeBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "navigation"
+        },
+        {
+          "command": "bounding-box-editor.removeSelectedBoxes",
+          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "navigation"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
-          "command": "bounding-box-editor.createNewBbox",
-          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
-          "group": "inline"
-        },
-        {
-          "command": "bounding-box-editor.createNewBbox",
-          "when": "view == boundingBoxEditor.projectView && viewItem == imageOnly",
-          "group": "inline"
-        },
-        {
           "command": "bounding-box-editor.removeAllBoxes",
           "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
           "group": "inline"
         },
         {
@@ -137,8 +166,13 @@
           "group": "inline"
         },
         {
-          "command": "bounding-box-editor.renameBox",
+          "command": "bounding-box-editor.revealBboxFile",
           "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
           "group": "inline"
         },
         {
@@ -147,7 +181,7 @@
           "group": "inline"
         },
         {
-          "command": "bounding-box-editor.renameBox",
+          "command": "bounding-box-editor.revealBboxFile",
           "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
           "group": "inline"
         }
@@ -160,6 +194,10 @@
         {
           "command": "bounding-box-editor.removeBoundingBox",
           "when": "boundingBoxEditor.hasBoxSelected"
+        },
+        {
+          "command": "bounding-box-editor.revealBboxFile",
+          "when": "boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected"
         }
       ]
     }

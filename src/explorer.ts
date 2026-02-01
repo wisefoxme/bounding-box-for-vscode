@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { getImageDirUri, getBboxDirUri, getBboxExtension, onSettingsChanged, getSettings } from './settings';
+import { getImageDirUri, getBboxUriForImage, getBboxExtension, onSettingsChanged, getSettings } from './settings';
 import { parseBbox } from './bbox';
 import type { Bbox } from './bbox';
-import { setSelectedBoxIndex, getSelectedBoxIndex } from './selectedImage';
+import { setSelectedBoxIndex, getSelectedBoxIndices } from './selectedImage';
 
 const IMAGE_GLOB = '**/*.{png,jpg,jpeg,gif,webp}';
 
@@ -36,6 +36,7 @@ export class BoundingBoxesGroupItem extends vscode.TreeItem {
 		public readonly imageUri: vscode.Uri,
 		public readonly bboxUri: vscode.Uri,
 		public readonly workspaceFolder: vscode.WorkspaceFolder,
+		public readonly parent?: ProjectTreeItem,
 	) {
 		super('Bounding boxes', vscode.TreeItemCollapsibleState.Collapsed);
 		this.contextValue = 'bboxGroup';
@@ -48,7 +49,7 @@ export class BoxTreeItem extends vscode.TreeItem {
 		public readonly imageUri: vscode.Uri,
 		public readonly bboxIndex: number,
 		label: string,
-		options?: { description?: string; selected?: boolean },
+		options?: { description?: string; selected?: boolean; parent?: BoundingBoxesGroupItem },
 	) {
 		super(label, vscode.TreeItemCollapsibleState.None);
 		this.contextValue = 'bboxItem';
@@ -64,7 +65,9 @@ export class BoxTreeItem extends vscode.TreeItem {
 		if (options?.selected) {
 			this.description = (this.description ? this.description + ' ' : '') + '(selected)';
 		}
+		this._parent = options?.parent;
 	}
+	readonly _parent: BoundingBoxesGroupItem | undefined;
 }
 
 export type ExplorerTreeItem = ProjectTreeItem | BoundingBoxesGroupItem | BoxTreeItem;
@@ -89,6 +92,16 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 		return element;
 	}
 
+	getParent(element: ExplorerTreeItem): ExplorerTreeItem | undefined {
+		if (element instanceof BoundingBoxesGroupItem) {
+			return element.parent;
+		}
+		if (element instanceof BoxTreeItem) {
+			return element._parent;
+		}
+		return undefined;
+	}
+
 	async getChildren(element?: ExplorerTreeItem): Promise<ExplorerTreeItem[]> {
 		const folders = vscode.workspace.workspaceFolders;
 		if (!folders || folders.length === 0) {
@@ -99,14 +112,10 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 			const items: ProjectTreeItem[] = [];
 			for (const folder of folders) {
 				const imageDir = getImageDirUri(folder);
-				const bboxDir = getBboxDirUri(folder);
 				const pattern = new vscode.RelativePattern(imageDir, IMAGE_GLOB);
 				const imageUris = await vscode.workspace.findFiles(pattern, null, 1000);
 				for (const imageUri of imageUris) {
-					const base = imageUri.path.replace(/\.[^/.]+$/, '');
-					const baseName = base.split('/').pop() ?? '';
-					const bboxPath = `${baseName}${getBboxExtension()}`;
-					const bboxUri = vscode.Uri.joinPath(bboxDir, bboxPath);
+					const bboxUri = getBboxUriForImage(folder, imageUri);
 					let bboxExists: boolean;
 					try {
 						await vscode.workspace.fs.stat(bboxUri);
@@ -124,7 +133,7 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 			if (element.bboxUri === undefined) {
 				return [];
 			}
-			return [new BoundingBoxesGroupItem(element.imageUri, element.bboxUri, element.workspaceFolder)];
+			return [new BoundingBoxesGroupItem(element.imageUri, element.bboxUri, element.workspaceFolder, element)];
 		}
 
 		if (isBoundingBoxesGroupItem(element)) {
@@ -136,11 +145,15 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 				return [];
 			}
 			const settings = getSettings();
-			const selectedIndex = getSelectedBoxIndex();
+			const selectedIndices = getSelectedBoxIndices();
 			if (settings.bboxFormat === 'yolo') {
 				const lines = content.trim().split(/\r?\n/).filter(Boolean);
 				return lines.map(
-					(_, i) => new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`, { selected: selectedIndex === i }),
+					(_, i) =>
+						new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`, {
+							selected: selectedIndices.includes(i),
+							parent: element,
+						}),
 				);
 			}
 			const boxes = parseBbox(content, settings.bboxFormat, 0, 0);
@@ -149,7 +162,8 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 				const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;
 				return new BoxTreeItem(element.imageUri, i, label, {
 					description,
-					selected: selectedIndex === i,
+					selected: selectedIndices.includes(i),
+					parent: element,
 				});
 			});
 		}
@@ -176,6 +190,11 @@ export function registerExplorer(
 					return;
 				}
 				if (sel instanceof ProjectTreeItem) {
+					if (sel.bboxUri) {
+						setTimeout(() => {
+							void treeView.reveal(sel, { expand: 2 });
+						}, 0);
+					}
 					onSelectionChange(sel.imageUri);
 				} else if (sel instanceof BoundingBoxesGroupItem) {
 					onSelectionChange(sel.imageUri);

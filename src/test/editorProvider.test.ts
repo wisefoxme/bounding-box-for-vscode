@@ -21,14 +21,14 @@ suite('editorProvider', () => {
 		assert.ok(html.includes('"height":40'));
 	});
 
-	test('getWebviewHtml with selectedBoxIndex embeds initial selected value', () => {
-		const html = getWebviewHtml('x', [], 'y', 'coco', 2);
-		assert.ok(html.includes('selectedBoxIndex = 2'), 'script should set selectedBoxIndex to 2');
+	test('getWebviewHtml with selectedBoxIndices embeds initial selected value', () => {
+		const html = getWebviewHtml('x', [], 'y', 'coco', [2]);
+		assert.ok(html.includes('selectedBoxIndices = [2]'), 'script should set selectedBoxIndices to [2]');
 	});
 
-	test('getWebviewHtml without selectedBoxIndex uses null for initial selected', () => {
+	test('getWebviewHtml without selectedBoxIndices uses empty array for initial selected', () => {
 		const html = getWebviewHtml('x', [], 'y', 'coco');
-		assert.ok(html.includes('selectedBoxIndex = null') || html.includes('selectedBoxIndex=null'), 'script should set selectedBoxIndex to null');
+		assert.ok(html.includes('selectedBoxIndices = []'), 'script should set selectedBoxIndices to []');
 	});
 
 	test('getWebviewHtml includes resize handle and drag logic', () => {
@@ -52,7 +52,7 @@ suite('editorProvider', () => {
 		assert.ok(html.includes('selectionChanged'), 'script should post selectionChanged');
 		assert.ok(html.includes('notifySelectionChanged'), 'script should notify selection changes');
 		assert.ok(html.includes('keydown'), 'script should handle keydown');
-		assert.ok(html.includes('removeBoxAt'), 'script should handle removeBoxAt message');
+		assert.ok(html.includes('removeBoxAt') || html.includes('removeBoxAtIndices'), 'script should handle remove message');
 		assert.ok(html.includes('renameBoxAt'), 'script should handle renameBoxAt message');
 	});
 });

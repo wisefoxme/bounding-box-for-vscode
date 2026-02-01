@@ -26,7 +26,7 @@ export function parseCoco(content: string): Bbox[] {
 					y_min,
 					width,
 					height,
-					label: parts[4],
+					label: parts.length > 4 ? parts.slice(4).join(' ') : undefined,
 				});
 			}
 		}
@@ -99,7 +99,7 @@ export function parsePascalVoc(content: string): Bbox[] {
 					y_min,
 					width: Math.max(0, x_max - x_min),
 					height: Math.max(0, y_max - y_min),
-					label: parts[4],
+					label: parts.length > 4 ? parts.slice(4).join(' ') : undefined,
 				});
 			}
 		}

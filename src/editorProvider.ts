@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getBboxDirUri, getBboxExtension, getSettings } from './settings';
+import { getBboxUriForImage, getBboxExtension, getDefaultBoundingBoxes, getSettings } from './settings';
 import type { Bbox } from './bbox';
 import { parseBbox, serializeBbox } from './bbox';
 import { SELECTED_BOX_STATE_PREFIX } from './explorer';
@@ -9,7 +9,7 @@ export const ADD_BOX_ON_OPEN_PREFIX = 'addBoxOnOpen_';
 export interface BoundingBoxEditorProviderOptions {
 	onBboxSaved?: (imageUri: vscode.Uri) => void;
 	onEditorOpened?: (imageUri: vscode.Uri) => void;
-	onSelectionChanged?: (imageUri: vscode.Uri, selectedBoxIndex: number | undefined) => void;
+	onSelectionChanged?: (imageUri: vscode.Uri, selectedBoxIndices: number[]) => void;
 	onEditorViewStateChange?: (imageUri: vscode.Uri, active: boolean) => void;
 }
 
@@ -30,10 +30,7 @@ function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
 	if (!folder) {
 		return undefined;
 	}
-	const bboxDir = getBboxDirUri(folder);
-	const base = imageUri.path.replace(/\.[^/.]+$/, '');
-	const baseName = base.split('/').pop() ?? '';
-	return vscode.Uri.joinPath(bboxDir, baseName + getBboxExtension());
+	return getBboxUriForImage(folder, imageUri);
 }
 
 export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorProvider<BoundingBoxDocument> {
@@ -70,7 +67,14 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		}
 		const settings = getSettings();
 		// Image dimensions unknown until webview loads; use 0 for non-YOLO
-		const boxes = parseBbox(bboxContent, settings.bboxFormat, 0, 0);
+		let boxes = parseBbox(bboxContent, settings.bboxFormat, 0, 0);
+		if (boxes.length === 0) {
+			const scope = vscode.workspace.getWorkspaceFolder(uri);
+			const defaults = getDefaultBoundingBoxes(scope);
+			if (defaults.length > 0) {
+				boxes = defaults;
+			}
+		}
 		return new BoundingBoxDocument(uri, bboxUri, bboxContent, boxes, 0, 0);
 	}
 
@@ -95,8 +99,9 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		const settings = getSettings();
 		const initialBoxes = document.boxes;
 		const stateKey = SELECTED_BOX_STATE_PREFIX + document.uri.toString();
-		let selectedBoxIndex: number | undefined = this._context.workspaceState.get<number>(stateKey);
-		if (selectedBoxIndex !== undefined) {
+		const storedIndex = this._context.workspaceState.get<number>(stateKey);
+		const initialSelectedIndices: number[] = storedIndex !== undefined ? [storedIndex] : [];
+		if (storedIndex !== undefined) {
 			this._context.workspaceState.update(stateKey, undefined);
 		}
 
@@ -106,13 +111,13 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				initialBoxes,
 				document.bboxUri.toString(),
 				settings.bboxFormat,
-				selectedBoxIndex,
+				initialSelectedIndices,
 			);
 		};
 		updateWebview();
 
 		webviewPanel.webview.onDidReceiveMessage(
-			async (msg: { type: string; boxes?: Bbox[]; imgWidth?: number; imgHeight?: number; selectedBoxIndex?: number | null }) => {
+			async (msg: { type: string; boxes?: Bbox[]; imgWidth?: number; imgHeight?: number; selectedBoxIndices?: number[] }) => {
 				if (msg.type === 'init' && msg.imgWidth !== undefined && msg.imgHeight !== undefined) {
 					document.imgWidth = msg.imgWidth;
 					document.imgHeight = msg.imgHeight;
@@ -135,9 +140,8 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 					document.bboxContent = serialized;
 					this._options.onBboxSaved?.(document.uri);
 				}
-				if (msg.type === 'selectionChanged') {
-					const idx = msg.selectedBoxIndex;
-					this._options.onSelectionChanged?.(document.uri, idx === null || idx === undefined ? undefined : idx);
+				if (msg.type === 'selectionChanged' && Array.isArray(msg.selectedBoxIndices)) {
+					this._options.onSelectionChanged?.(document.uri, msg.selectedBoxIndices);
 				}
 			},
 		);
@@ -149,11 +153,11 @@ export function getWebviewHtml(
 	boxes: Bbox[],
 	_bboxUri: string,
 	_format: string,
-	selectedBoxIndex?: number,
+	selectedBoxIndices: number[] = [],
 ): string {
 	const boxData = JSON.stringify(boxes).replace(/</g, '\\u003c');
 	const safeImageSrc = escapeHtml(imageSrc);
-	const initialSelected = selectedBoxIndex !== undefined ? selectedBoxIndex : 'null';
+	const initialSelected = JSON.stringify(selectedBoxIndices);
 	return `<!DOCTYPE html>
 <html>
 <head>
@@ -192,7 +196,7 @@ export function getWebviewHtml(
 		const svg = document.getElementById('svg');
 		let boxes = ${boxData};
 		let imgWidth = 0, imgHeight = 0;
-		let selectedBoxIndex = ${initialSelected};
+		let selectedBoxIndices = ${initialSelected};
 		const HANDLE_SIZE = 8;
 		const HIT_MARGIN = 6;
 		const MIN_DRAW_PIXELS = 5;
@@ -201,7 +205,7 @@ export function getWebviewHtml(
 		let drawCurrent = null;
 
 		function notifySelectionChanged() {
-			vscode.postMessage({ type: 'selectionChanged', selectedBoxIndex: selectedBoxIndex });
+			vscode.postMessage({ type: 'selectionChanged', selectedBoxIndices: selectedBoxIndices.slice() });
 		}
 
 		function escapeHtml(s) {
@@ -219,11 +223,12 @@ export function getWebviewHtml(
 			for (let i = 0; i < boxes.length; i++) {
 				const b = boxes[i];
 				const x = b.x_min * scaleX, y = b.y_min * scaleY, wb = b.width * scaleX, hb = b.height * scaleY;
-				const sel = selectedBoxIndex === i ? ' selected' : '';
+				const sel = selectedBoxIndices.indexOf(i) >= 0 ? ' selected' : '';
 				html += '<rect class="bbox' + sel + '" data-i="' + i + '" x="' + x + '" y="' + y + '" width="' + wb + '" height="' + hb + '"/>';
 			}
-			if (selectedBoxIndex !== null && selectedBoxIndex !== undefined && boxes[selectedBoxIndex]) {
-				const b = boxes[selectedBoxIndex];
+			const singleIndex = selectedBoxIndices.length === 1 ? selectedBoxIndices[0] : null;
+			if (singleIndex !== null && boxes[singleIndex]) {
+				const b = boxes[singleIndex];
 				const x = b.x_min * scaleX, y = b.y_min * scaleY, wb = b.width * scaleX, hb = b.height * scaleY;
 				const hs = HANDLE_SIZE / 2;
 				const handles = [
@@ -237,7 +242,7 @@ export function getWebviewHtml(
 					{ id: 'sw', x: x - hs, y: y + hb - hs, w: HANDLE_SIZE, h: HANDLE_SIZE, c: 'sw' }
 				];
 				handles.forEach(function(h) {
-					html += '<rect class="handle ' + h.c + '" data-handle="' + h.id + '" data-i="' + selectedBoxIndex + '" x="' + h.x + '" y="' + h.y + '" width="' + h.w + '" height="' + h.h + '"/>';
+					html += '<rect class="handle ' + h.c + '" data-handle="' + h.id + '" data-i="' + singleIndex + '" x="' + h.x + '" y="' + h.y + '" width="' + h.w + '" height="' + h.h + '"/>';
 				});
 			}
 			if (drawStart !== null && drawCurrent !== null && imgWidth > 0 && imgHeight > 0) {
@@ -267,8 +272,9 @@ export function getWebviewHtml(
 			const scaleX = w / imgWidth, scaleY = h / imgHeight;
 			const px = ev.clientX - rect.left;
 			const py = ev.clientY - rect.top;
-			if (selectedBoxIndex === null || selectedBoxIndex === undefined || !boxes[selectedBoxIndex]) return null;
-			const b = boxes[selectedBoxIndex];
+			const singleIndex = selectedBoxIndices.length === 1 ? selectedBoxIndices[0] : null;
+			if (singleIndex === null || !boxes[singleIndex]) return null;
+			const b = boxes[singleIndex];
 			const x = b.x_min * scaleX, y = b.y_min * scaleY, wb = b.width * scaleX, hb = b.height * scaleY;
 			const hs = HANDLE_SIZE / 2;
 			const handles = [
@@ -283,7 +289,7 @@ export function getWebviewHtml(
 			];
 			for (let i = 0; i < handles.length; i++) {
 				const [id, hx, hy, hw, hh] = handles[i];
-				if (px >= hx && px <= hx + hw && py >= hy && py <= hy + hh) return { index: selectedBoxIndex, handle: id };
+				if (px >= hx && px <= hx + hw && py >= hy && py <= hy + hh) return { index: singleIndex, handle: id };
 			}
 			return null;
 		}
@@ -338,14 +344,21 @@ export function getWebviewHtml(
 			}
 			const edgeHit = hitTestEdgeOrBody(e);
 			if (edgeHit) {
-				selectedBoxIndex = edgeHit.index;
+				if (e.shiftKey) {
+					const idx = selectedBoxIndices.indexOf(edgeHit.index);
+					if (idx >= 0) selectedBoxIndices.splice(idx, 1);
+					else selectedBoxIndices.push(edgeHit.index);
+					selectedBoxIndices.sort(function(a,b){ return a - b; });
+				} else {
+					selectedBoxIndices = [edgeHit.index];
+				}
 				draw();
 				notifySelectionChanged();
 				const pos = svgCoordsToImage(e);
 				drag = { boxIndex: edgeHit.index, handle: edgeHit.handle, startX: pos.x, startY: pos.y, startBox: Object.assign({}, boxes[edgeHit.index]) };
 				e.preventDefault();
 			} else {
-				selectedBoxIndex = null;
+				selectedBoxIndices = [];
 				if (imgWidth > 0 && imgHeight > 0) {
 					drawStart = svgCoordsToImage(e);
 					drawCurrent = null;
@@ -392,7 +405,7 @@ export function getWebviewHtml(
 				draw();
 				if (imgWidth > 0 && imgHeight > 0 && width >= MIN_DRAW_PIXELS && height >= MIN_DRAW_PIXELS) {
 					boxes.push({ x_min, y_min, width, height });
-					selectedBoxIndex = boxes.length - 1;
+					selectedBoxIndices = [boxes.length - 1];
 					draw();
 					vscode.postMessage({ type: 'save', boxes: boxes });
 					notifySelectionChanged();
@@ -410,7 +423,7 @@ export function getWebviewHtml(
 		window.addEventListener('message', e => {
 			const d = e.data;
 			if (d && d.type === 'boxes') { boxes = d.boxes || []; draw(); }
-			if (d && d.type === 'selectedBoxIndex') { selectedBoxIndex = d.selectedBoxIndex; draw(); }
+			if (d && d.type === 'selectedBoxIndices' && Array.isArray(d.selectedBoxIndices)) { selectedBoxIndices = d.selectedBoxIndices.slice(); draw(); }
 			if (d && d.type === 'addBox') {
 				if (imgWidth > 0 && imgHeight > 0) {
 					const w = Math.max(50, Math.floor(imgWidth * 0.1));
@@ -418,7 +431,7 @@ export function getWebviewHtml(
 					const x_min = Math.max(0, Math.floor((imgWidth - w) / 2));
 					const y_min = Math.max(0, Math.floor((imgHeight - h) / 2));
 					boxes.push({ x_min, y_min, width: w, height: h });
-					selectedBoxIndex = boxes.length - 1;
+					selectedBoxIndices = [boxes.length - 1];
 					draw();
 					vscode.postMessage({ type: 'save', boxes });
 					notifySelectionChanged();
@@ -428,12 +441,22 @@ export function getWebviewHtml(
 				const i = d.bboxIndex;
 				if (i >= 0 && i < boxes.length) {
 					boxes.splice(i, 1);
-					if (selectedBoxIndex === i) selectedBoxIndex = null;
-					else if (selectedBoxIndex !== null && selectedBoxIndex > i) selectedBoxIndex--;
+					selectedBoxIndices = selectedBoxIndices.filter(function(x){ return x !== i; }).map(function(x){ return x > i ? x - 1 : x; });
 					draw();
 					vscode.postMessage({ type: 'save', boxes });
 					notifySelectionChanged();
 				}
+			}
+			if (d && d.type === 'removeBoxAtIndices' && Array.isArray(d.bboxIndices)) {
+				const indices = d.bboxIndices.slice().sort(function(a,b){ return b - a; });
+				for (let k = 0; k < indices.length; k++) {
+					const i = indices[k];
+					if (i >= 0 && i < boxes.length) boxes.splice(i, 1);
+				}
+				selectedBoxIndices = [];
+				draw();
+				vscode.postMessage({ type: 'save', boxes });
+				notifySelectionChanged();
 			}
 			if (d && d.type === 'renameBoxAt' && typeof d.bboxIndex === 'number' && typeof d.label === 'string') {
 				const i = d.bboxIndex;
@@ -450,8 +473,7 @@ export function getWebviewHtml(
 			if (!rect) return;
 			const i = parseInt(rect.getAttribute('data-i'), 10);
 			boxes.splice(i, 1);
-			if (selectedBoxIndex === i) selectedBoxIndex = null;
-			else if (selectedBoxIndex !== null && selectedBoxIndex > i) selectedBoxIndex--;
+			selectedBoxIndices = selectedBoxIndices.filter(function(x){ return x !== i; }).map(function(x){ return x > i ? x - 1 : x; });
 			draw();
 			vscode.postMessage({ type: 'save', boxes });
 			notifySelectionChanged();
@@ -459,10 +481,13 @@ export function getWebviewHtml(
 
 		window.addEventListener('keydown', function(e) {
 			if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-			if (selectedBoxIndex === null || selectedBoxIndex === undefined || !boxes[selectedBoxIndex]) return;
-			const i = selectedBoxIndex;
-			boxes.splice(i, 1);
-			selectedBoxIndex = null;
+			if (selectedBoxIndices.length === 0) return;
+			const indices = selectedBoxIndices.slice().sort(function(a,b){ return b - a; });
+			for (let k = 0; k < indices.length; k++) {
+				const i = indices[k];
+				if (i >= 0 && i < boxes.length) boxes.splice(i, 1);
+			}
+			selectedBoxIndices = [];
 			draw();
 			vscode.postMessage({ type: 'save', boxes });
 			notifySelectionChanged();

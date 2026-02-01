@@ -1,11 +1,10 @@
 import * as vscode from 'vscode';
-import { getBboxDirUri, getBboxExtension, getSettings } from './settings';
+import { getBboxUriForImage, getSettings } from './settings';
 import { parseBbox } from './bbox';
 import type { Bbox } from './bbox';
-import { getSelectedImageUri, getSelectedBoxIndex } from './selectedImage';
+import { getSelectedImageUri, getSelectedBoxIndices } from './selectedImage';
 import { BoxTreeItem } from './explorer';
 
-const CREATE_NEW_BBOX_COMMAND = 'bounding-box-editor.createNewBbox';
 const OPEN_IMAGE_WITH_BOX_COMMAND = 'bounding-box-editor.openImageWithBox';
 
 function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
@@ -13,33 +12,17 @@ function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
 	if (!folder) {
 		return undefined;
 	}
-	const bboxDir = getBboxDirUri(folder);
-	const base = imageUri.path.replace(/\.[^/.]+$/, '');
-	const baseName = base.split('/').pop() ?? '';
-	return vscode.Uri.joinPath(bboxDir, baseName + getBboxExtension());
-}
-
-export class CreateNewBoxItem extends vscode.TreeItem {
-	constructor(public readonly imageUri: vscode.Uri) {
-		super('Create new bounding box', vscode.TreeItemCollapsibleState.None);
-		this.contextValue = 'createBbox';
-		this.iconPath = new vscode.ThemeIcon('add');
-		this.command = {
-			command: CREATE_NEW_BBOX_COMMAND,
-			title: 'Create new bounding box',
-			arguments: [imageUri],
-		};
-	}
+	return getBboxUriForImage(folder, imageUri);
 }
 
 export class BboxSectionPlaceholderItem extends vscode.TreeItem {
-	constructor() {
-		super('Select an image from Project', vscode.TreeItemCollapsibleState.None);
+	constructor(message = 'Select an image from Project') {
+		super(message, vscode.TreeItemCollapsibleState.None);
 		this.contextValue = 'placeholder';
 	}
 }
 
-export type BboxSectionTreeItem = CreateNewBoxItem | BoxTreeItem | BboxSectionPlaceholderItem;
+export type BboxSectionTreeItem = BoxTreeItem | BboxSectionPlaceholderItem;
 
 export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<BboxSectionTreeItem> {
 	private _onDidChangeTreeData = new vscode.EventEmitter<BboxSectionTreeItem | undefined | void>();
@@ -65,30 +48,30 @@ export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<Bbox
 
 		const bboxUri = resolveBboxUri(imageUri);
 		if (!bboxUri) {
-			return [new CreateNewBoxItem(imageUri)];
+			return [new BboxSectionPlaceholderItem('Open the image and draw on the canvas to add boxes')];
 		}
 
 		let content: string;
 		try {
 			await vscode.workspace.fs.stat(bboxUri);
 		} catch {
-			return [new CreateNewBoxItem(imageUri)];
+			return [new BboxSectionPlaceholderItem('Open the image and draw on the canvas to add boxes')];
 		}
 		try {
 			const buf = await vscode.workspace.fs.readFile(bboxUri);
 			content = new TextDecoder().decode(buf);
 		} catch {
-			return [new CreateNewBoxItem(imageUri)];
+			return [new BboxSectionPlaceholderItem('Open the image and draw on the canvas to add boxes')];
 		}
 
 		const settings = getSettings();
-		const items: BboxSectionTreeItem[] = [new CreateNewBoxItem(imageUri)];
-		const selectedIndex = getSelectedBoxIndex();
+		const items: BboxSectionTreeItem[] = [];
+		const selectedIndices = getSelectedBoxIndices();
 
 		if (settings.bboxFormat === 'yolo') {
 			const lines = content.trim().split(/\r?\n/).filter(Boolean);
 			for (let i = 0; i < lines.length; i++) {
-				items.push(new BoxTreeItem(imageUri, i, `Box ${i + 1}`, { selected: selectedIndex === i }));
+				items.push(new BoxTreeItem(imageUri, i, `Box ${i + 1}`, { selected: selectedIndices.includes(i) }));
 			}
 		} else {
 			const boxes: Bbox[] = parseBbox(content, settings.bboxFormat, 0, 0);
@@ -98,7 +81,7 @@ export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<Bbox
 				const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;
 				items.push(new BoxTreeItem(imageUri, i, label, {
 					description,
-					selected: selectedIndex === i,
+					selected: selectedIndices.includes(i),
 				}));
 			}
 		}
@@ -107,4 +90,4 @@ export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<Bbox
 	}
 }
 
-export { CREATE_NEW_BBOX_COMMAND, OPEN_IMAGE_WITH_BOX_COMMAND };
+export { OPEN_IMAGE_WITH_BOX_COMMAND };
