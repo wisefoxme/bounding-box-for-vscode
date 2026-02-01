@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { getImageDirUri, getBboxDirUri, getBboxExtension, onSettingsChanged, getSettings } from './settings';
 import { parseBbox } from './bbox';
 import type { Bbox } from './bbox';
+import { setSelectedBoxIndex, getSelectedBoxIndex } from './selectedImage';
 
 const IMAGE_GLOB = '**/*.{png,jpg,jpeg,gif,webp}';
 
@@ -47,6 +48,7 @@ export class BoxTreeItem extends vscode.TreeItem {
 		public readonly imageUri: vscode.Uri,
 		public readonly bboxIndex: number,
 		label: string,
+		options?: { description?: string; selected?: boolean },
 	) {
 		super(label, vscode.TreeItemCollapsibleState.None);
 		this.contextValue = 'bboxItem';
@@ -56,6 +58,12 @@ export class BoxTreeItem extends vscode.TreeItem {
 			title: 'Open and select box',
 			arguments: [imageUri, bboxIndex],
 		};
+		if (options?.description !== undefined) {
+			this.description = options.description;
+		}
+		if (options?.selected) {
+			this.description = (this.description ? this.description + ' ' : '') + '(selected)';
+		}
 	}
 }
 
@@ -128,17 +136,21 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 				return [];
 			}
 			const settings = getSettings();
-			let boxes: Bbox[];
+			const selectedIndex = getSelectedBoxIndex();
 			if (settings.bboxFormat === 'yolo') {
 				const lines = content.trim().split(/\r?\n/).filter(Boolean);
 				return lines.map(
-					(_, i) => new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`),
+					(_, i) => new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`, { selected: selectedIndex === i }),
 				);
 			}
-			boxes = parseBbox(content, settings.bboxFormat, 0, 0);
+			const boxes = parseBbox(content, settings.bboxFormat, 0, 0);
 			return boxes.map((b, i) => {
 				const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;
-				return new BoxTreeItem(element.imageUri, i, label);
+				const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;
+				return new BoxTreeItem(element.imageUri, i, label, {
+					description,
+					selected: selectedIndex === i,
+				});
 			});
 		}
 
@@ -149,6 +161,7 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 export function registerExplorer(
 	context: vscode.ExtensionContext,
 	onSelectionChange?: (imageUri: vscode.Uri | undefined) => void,
+	refreshBboxSection?: () => void,
 ): { provider: ProjectTreeDataProvider; treeView: vscode.TreeView<ExplorerTreeItem> } {
 	const provider = new ProjectTreeDataProvider();
 	const treeView = vscode.window.createTreeView('boundingBoxEditor.projectView', { treeDataProvider: provider });
@@ -181,7 +194,9 @@ export function registerExplorer(
 		vscode.commands.registerCommand(OPEN_IMAGE_WITH_BOX_COMMAND, (imageUri: vscode.Uri, bboxIndex: number) => {
 			const key = SELECTED_BOX_STATE_PREFIX + imageUri.toString();
 			context.workspaceState.update(key, bboxIndex);
-			vscode.commands.executeCommand('vscode.openWith', imageUri, 'boundingBoxEditor.imageEditor');
+			setSelectedBoxIndex(bboxIndex);
+			refreshBboxSection?.();
+			void vscode.commands.executeCommand('vscode.openWith', imageUri, 'boundingBoxEditor.imageEditor');
 		}),
 	);
 

@@ -9,6 +9,8 @@ export const ADD_BOX_ON_OPEN_PREFIX = 'addBoxOnOpen_';
 export interface BoundingBoxEditorProviderOptions {
 	onBboxSaved?: (imageUri: vscode.Uri) => void;
 	onEditorOpened?: (imageUri: vscode.Uri) => void;
+	onSelectionChanged?: (imageUri: vscode.Uri, selectedBoxIndex: number | undefined) => void;
+	onEditorViewStateChange?: (imageUri: vscode.Uri, active: boolean) => void;
 }
 
 class BoundingBoxDocument implements vscode.CustomDocument {
@@ -35,10 +37,23 @@ function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
 }
 
 export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorProvider<BoundingBoxDocument> {
+	private readonly _panelsByUri = new Map<string, vscode.WebviewPanel>();
+
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
 		private readonly _options: BoundingBoxEditorProviderOptions = {},
 	) {}
+
+	postMessageToEditor(imageUri: vscode.Uri, msg: unknown): void {
+		const panel = this._panelsByUri.get(imageUri.toString());
+		if (panel) {
+			panel.webview.postMessage(msg);
+		}
+	}
+
+	hasEditorOpen(imageUri: vscode.Uri): boolean {
+		return this._panelsByUri.has(imageUri.toString());
+	}
 
 	async openCustomDocument(
 		uri: vscode.Uri,
@@ -64,6 +79,12 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		webviewPanel: vscode.WebviewPanel,
 		_token: vscode.CancellationToken,
 	): Promise<void> {
+		this._panelsByUri.set(document.uri.toString(), webviewPanel);
+		webviewPanel.onDidDispose(() => this._panelsByUri.delete(document.uri.toString()));
+		webviewPanel.onDidChangeViewState(() => {
+			this._options.onEditorViewStateChange?.(document.uri, webviewPanel.active);
+		});
+		this._options.onEditorViewStateChange?.(document.uri, webviewPanel.active);
 		this._options.onEditorOpened?.(document.uri);
 
 		webviewPanel.webview.options = {
@@ -90,30 +111,36 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		};
 		updateWebview();
 
-		webviewPanel.webview.onDidReceiveMessage(async (msg: { type: string; boxes?: Bbox[]; imgWidth?: number; imgHeight?: number }) => {
-			if (msg.type === 'init' && msg.imgWidth !== undefined && msg.imgHeight !== undefined) {
-				document.imgWidth = msg.imgWidth;
-				document.imgHeight = msg.imgHeight;
-				// Re-parse if YOLO (needs dimensions)
-				if (settings.bboxFormat === 'yolo' && document.bboxContent) {
-					document.boxes = parseBbox(document.bboxContent, 'yolo', document.imgWidth, document.imgHeight);
-					webviewPanel.webview.postMessage({ type: 'boxes', boxes: document.boxes });
+		webviewPanel.webview.onDidReceiveMessage(
+			async (msg: { type: string; boxes?: Bbox[]; imgWidth?: number; imgHeight?: number; selectedBoxIndex?: number | null }) => {
+				if (msg.type === 'init' && msg.imgWidth !== undefined && msg.imgHeight !== undefined) {
+					document.imgWidth = msg.imgWidth;
+					document.imgHeight = msg.imgHeight;
+					// Re-parse if YOLO (needs dimensions)
+					if (settings.bboxFormat === 'yolo' && document.bboxContent) {
+						document.boxes = parseBbox(document.bboxContent, 'yolo', document.imgWidth, document.imgHeight);
+						webviewPanel.webview.postMessage({ type: 'boxes', boxes: document.boxes });
+					}
+					const addBoxKey = ADD_BOX_ON_OPEN_PREFIX + document.uri.toString();
+					if (this._context.workspaceState.get<boolean>(addBoxKey)) {
+						this._context.workspaceState.update(addBoxKey, undefined);
+						webviewPanel.webview.postMessage({ type: 'addBox' });
+					}
+					return;
 				}
-				const addBoxKey = ADD_BOX_ON_OPEN_PREFIX + document.uri.toString();
-				if (this._context.workspaceState.get<boolean>(addBoxKey)) {
-					this._context.workspaceState.update(addBoxKey, undefined);
-					webviewPanel.webview.postMessage({ type: 'addBox' });
+				if (msg.type === 'save' && Array.isArray(msg.boxes)) {
+					document.boxes = msg.boxes;
+					const serialized = serializeBbox(msg.boxes, settings.bboxFormat, document.imgWidth, document.imgHeight);
+					await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
+					document.bboxContent = serialized;
+					this._options.onBboxSaved?.(document.uri);
 				}
-				return;
-			}
-			if (msg.type === 'save' && Array.isArray(msg.boxes)) {
-				document.boxes = msg.boxes;
-				const serialized = serializeBbox(msg.boxes, settings.bboxFormat, document.imgWidth, document.imgHeight);
-				await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
-				document.bboxContent = serialized;
-				this._options.onBboxSaved?.(document.uri);
-			}
-		});
+				if (msg.type === 'selectionChanged') {
+					const idx = msg.selectedBoxIndex;
+					this._options.onSelectionChanged?.(document.uri, idx === null || idx === undefined ? undefined : idx);
+				}
+			},
+		);
 	}
 }
 
@@ -172,6 +199,10 @@ export function getWebviewHtml(
 		let drag = null;
 		let drawStart = null;
 		let drawCurrent = null;
+
+		function notifySelectionChanged() {
+			vscode.postMessage({ type: 'selectionChanged', selectedBoxIndex: selectedBoxIndex });
+		}
 
 		function escapeHtml(s) {
 			if (typeof s !== 'string') return '';
@@ -309,6 +340,7 @@ export function getWebviewHtml(
 			if (edgeHit) {
 				selectedBoxIndex = edgeHit.index;
 				draw();
+				notifySelectionChanged();
 				const pos = svgCoordsToImage(e);
 				drag = { boxIndex: edgeHit.index, handle: edgeHit.handle, startX: pos.x, startY: pos.y, startBox: Object.assign({}, boxes[edgeHit.index]) };
 				e.preventDefault();
@@ -319,6 +351,7 @@ export function getWebviewHtml(
 					drawCurrent = null;
 				}
 				draw();
+				notifySelectionChanged();
 			}
 		});
 
@@ -362,6 +395,7 @@ export function getWebviewHtml(
 					selectedBoxIndex = boxes.length - 1;
 					draw();
 					vscode.postMessage({ type: 'save', boxes: boxes });
+					notifySelectionChanged();
 				}
 			}
 		});
@@ -387,6 +421,26 @@ export function getWebviewHtml(
 					selectedBoxIndex = boxes.length - 1;
 					draw();
 					vscode.postMessage({ type: 'save', boxes });
+					notifySelectionChanged();
+				}
+			}
+			if (d && d.type === 'removeBoxAt' && typeof d.bboxIndex === 'number') {
+				const i = d.bboxIndex;
+				if (i >= 0 && i < boxes.length) {
+					boxes.splice(i, 1);
+					if (selectedBoxIndex === i) selectedBoxIndex = null;
+					else if (selectedBoxIndex !== null && selectedBoxIndex > i) selectedBoxIndex--;
+					draw();
+					vscode.postMessage({ type: 'save', boxes });
+					notifySelectionChanged();
+				}
+			}
+			if (d && d.type === 'renameBoxAt' && typeof d.bboxIndex === 'number' && typeof d.label === 'string') {
+				const i = d.bboxIndex;
+				if (i >= 0 && i < boxes.length) {
+					boxes[i] = Object.assign({}, boxes[i], { label: d.label });
+					draw();
+					vscode.postMessage({ type: 'save', boxes });
 				}
 			}
 		});
@@ -400,6 +454,19 @@ export function getWebviewHtml(
 			else if (selectedBoxIndex !== null && selectedBoxIndex > i) selectedBoxIndex--;
 			draw();
 			vscode.postMessage({ type: 'save', boxes });
+			notifySelectionChanged();
+		});
+
+		window.addEventListener('keydown', function(e) {
+			if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+			if (selectedBoxIndex === null || selectedBoxIndex === undefined || !boxes[selectedBoxIndex]) return;
+			const i = selectedBoxIndex;
+			boxes.splice(i, 1);
+			selectedBoxIndex = null;
+			draw();
+			vscode.postMessage({ type: 'save', boxes });
+			notifySelectionChanged();
+			e.preventDefault();
 		});
 	</script>
 </body>

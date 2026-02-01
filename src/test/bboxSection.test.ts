@@ -5,7 +5,12 @@ import {
 	CreateNewBoxItem,
 	BboxSectionPlaceholderItem,
 } from '../bboxSection';
-import { setSelectedImageUri, getSelectedImageUri } from '../selectedImage';
+import {
+	setSelectedImageUri,
+	getSelectedImageUri,
+	setSelectedBoxIndex,
+	getSelectedBoxIndex,
+} from '../selectedImage';
 
 suite('selectedImage', () => {
 	test('getSelectedImageUri returns undefined initially', () => {
@@ -23,6 +28,20 @@ suite('selectedImage', () => {
 		assert.strictEqual(getSelectedImageUri()?.toString(), uri.toString());
 		setSelectedImageUri(undefined);
 		assert.strictEqual(getSelectedImageUri(), undefined);
+	});
+
+	test('getSelectedBoxIndex returns undefined initially', () => {
+		setSelectedBoxIndex(undefined);
+		assert.strictEqual(getSelectedBoxIndex(), undefined);
+	});
+
+	test('setSelectedBoxIndex and getSelectedBoxIndex round-trip', () => {
+		setSelectedBoxIndex(0);
+		assert.strictEqual(getSelectedBoxIndex(), 0);
+		setSelectedBoxIndex(2);
+		assert.strictEqual(getSelectedBoxIndex(), 2);
+		setSelectedBoxIndex(undefined);
+		assert.strictEqual(getSelectedBoxIndex(), undefined);
 	});
 });
 

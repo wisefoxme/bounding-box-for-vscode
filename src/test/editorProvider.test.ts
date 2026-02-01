@@ -46,4 +46,13 @@ suite('editorProvider', () => {
 		assert.ok(html.includes('drawCurrent'), 'script should track draw current');
 		assert.ok(html.includes('MIN_DRAW_PIXELS'), 'script should enforce minimum draw size');
 	});
+
+	test('getWebviewHtml includes selectionChanged and keydown remove and removeBoxAt', () => {
+		const html = getWebviewHtml('x', [], 'y', 'coco');
+		assert.ok(html.includes('selectionChanged'), 'script should post selectionChanged');
+		assert.ok(html.includes('notifySelectionChanged'), 'script should notify selection changes');
+		assert.ok(html.includes('keydown'), 'script should handle keydown');
+		assert.ok(html.includes('removeBoxAt'), 'script should handle removeBoxAt message');
+		assert.ok(html.includes('renameBoxAt'), 'script should handle renameBoxAt message');
+	});
 });

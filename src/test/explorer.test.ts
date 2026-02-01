@@ -86,6 +86,19 @@ suite('explorer', () => {
 		assert.deepStrictEqual(item.command?.arguments, [imageUri, 0]);
 	});
 
+	test('BoxTreeItem accepts optional description and selected', () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const imageUri = vscode.Uri.joinPath(folder.uri, 'b.png');
+		const withDesc = new BoxTreeItem(imageUri, 0, 'Label', { description: 'x:10 y:20 w:30 h:40' });
+		assert.strictEqual(withDesc.description, 'x:10 y:20 w:30 h:40');
+		const withSelected = new BoxTreeItem(imageUri, 0, 'Label', { description: 'coords', selected: true });
+		assert.ok((withSelected.description as string).includes('(selected)'));
+	});
+
 	test('getChildren(BoundingBoxesGroupItem) returns BoxTreeItems when bbox file exists with COCO content', async () => {
 		const folders = vscode.workspace.workspaceFolders;
 		if (!folders || folders.length === 0) {

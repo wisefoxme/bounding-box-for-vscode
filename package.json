@@ -85,6 +85,26 @@
         "command": "bounding-box-editor.createNewBbox",
         "title": "Create new bounding box",
         "icon": "$(add)"
+      },
+      {
+        "command": "bounding-box-editor.removeAllBoxes",
+        "title": "Remove all boxes"
+      },
+      {
+        "command": "bounding-box-editor.removeBox",
+        "title": "Remove box"
+      },
+      {
+        "command": "bounding-box-editor.renameBox",
+        "title": "Rename box"
+      },
+      {
+        "command": "bounding-box-editor.renameBoundingBox",
+        "title": "Rename bounding box"
+      },
+      {
+        "command": "bounding-box-editor.removeBoundingBox",
+        "title": "Remove bounding box"
       }
     ],
     "menus": {
@@ -93,6 +113,53 @@
           "command": "bounding-box-editor.createNewBbox",
           "when": "view == boundingBoxEditor.bboxSectionView",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "bounding-box-editor.createNewBbox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.createNewBbox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == imageOnly",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.removeAllBoxes",
+          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.removeBox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.removeBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.renameBox",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "bounding-box-editor.renameBoundingBox",
+          "when": "boundingBoxEditor.hasBoxSelected"
+        },
+        {
+          "command": "bounding-box-editor.removeBoundingBox",
+          "when": "boundingBoxEditor.hasBoxSelected"
         }
       ]
     }

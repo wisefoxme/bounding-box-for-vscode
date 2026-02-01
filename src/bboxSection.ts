@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { getBboxDirUri, getBboxExtension, getSettings } from './settings';
 import { parseBbox } from './bbox';
 import type { Bbox } from './bbox';
-import { getSelectedImageUri } from './selectedImage';
+import { getSelectedImageUri, getSelectedBoxIndex } from './selectedImage';
 import { BoxTreeItem } from './explorer';
 
 const CREATE_NEW_BBOX_COMMAND = 'bounding-box-editor.createNewBbox';
@@ -83,18 +83,23 @@ export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<Bbox
 
 		const settings = getSettings();
 		const items: BboxSectionTreeItem[] = [new CreateNewBoxItem(imageUri)];
+		const selectedIndex = getSelectedBoxIndex();
 
 		if (settings.bboxFormat === 'yolo') {
 			const lines = content.trim().split(/\r?\n/).filter(Boolean);
 			for (let i = 0; i < lines.length; i++) {
-				items.push(new BoxTreeItem(imageUri, i, `Box ${i + 1}`));
+				items.push(new BoxTreeItem(imageUri, i, `Box ${i + 1}`, { selected: selectedIndex === i }));
 			}
 		} else {
 			const boxes: Bbox[] = parseBbox(content, settings.bboxFormat, 0, 0);
 			for (let i = 0; i < boxes.length; i++) {
 				const b = boxes[i];
 				const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;
-				items.push(new BoxTreeItem(imageUri, i, label));
+				const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;
+				items.push(new BoxTreeItem(imageUri, i, label, {
+					description,
+					selected: selectedIndex === i,
+				}));
 			}
 		}
 
