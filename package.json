@@ -132,7 +132,7 @@
       },
       {
         "command": "bounding-box-editor.removeAllBoxes",
-        "title": "Remove all boxes",
+        "title": "Delete All",
         "icon": "$(trash)"
       },
       {
@@ -189,7 +189,7 @@
       "view/item/context": [
         {
           "command": "bounding-box-editor.removeAllBoxes",
-          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "when": "view == boundingBoxEditor.projectView && viewItem == bboxGroup",
           "group": "inline"
         },
         {

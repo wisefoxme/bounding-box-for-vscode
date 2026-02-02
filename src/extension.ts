@@ -8,7 +8,7 @@ import {
 	setSelectedBoxIndices,
 	getSelectedBoxIndices,
 } from './selectedImage';
-import { getPrimaryBboxUriForImage, getSettings, setBboxFormat } from './settings';
+import { getPrimaryBboxUriForImage, getSettings, setBboxFormat, readMergedBboxContent } from './settings';
 import type { BboxFormat } from './settings';
 import { getProviderForImage, getProvider } from './formatProviders';
 import type { Bbox } from './bbox';
@@ -144,16 +144,45 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('bounding-box-editor.removeAllBoxes', async () => {
-			const imageUri = getImageUriForRemoveAllBoxes();
-			if (!imageUri) {return;}
-			const folder = vscode.workspace.getWorkspaceFolder(imageUri);
-			if (!folder) {return;}
-			const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
-			await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(''));
-			refreshTrees();
-			editorProvider.postMessageToEditor(imageUri, { type: 'boxes', boxes: [] });
-		}),
+		vscode.commands.registerCommand(
+			'bounding-box-editor.removeAllBoxes',
+			async (node?: ProjectTreeItem | BoundingBoxesGroupItem | unknown) => {
+				let imageUri: vscode.Uri | undefined;
+				if (node instanceof ProjectTreeItem && node.bboxUri) {
+					imageUri = node.imageUri;
+				} else if (node instanceof BoundingBoxesGroupItem) {
+					imageUri = node.imageUri;
+				} else {
+					imageUri = getImageUriForRemoveAllBoxes();
+				}
+				if (!imageUri) {return;}
+				const folder = vscode.workspace.getWorkspaceFolder(imageUri);
+				if (!folder) {return;}
+				const merged = await readMergedBboxContent(
+					folder,
+					imageUri,
+					undefined,
+					getDimensions(imageUri),
+				);
+				const count = merged.boxes.length;
+				if (count === 0) {
+					void vscode.window.showInformationMessage('No bounding boxes to delete.');
+					return;
+				}
+				const message = `Delete all ${count} bounding box${count !== 1 ? 'es' : ''} for this image? This cannot be undone.`;
+				const choice = await vscode.window.showWarningMessage(
+					message,
+					{ modal: true },
+					'Delete All',
+					'Cancel',
+				);
+				if (choice !== 'Delete All') {return;}
+				const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
+				await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(''));
+				refreshTrees();
+				editorProvider.postMessageToEditor(imageUri, { type: 'boxes', boxes: [] });
+			},
+		),
 	);
 
 	async function removeSelectedBoxes(): Promise<void> {

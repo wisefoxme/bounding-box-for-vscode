@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { BoxTreeItem } from '../explorer';
+import { BoxTreeItem, ProjectTreeItem, BoundingBoxesGroupItem } from '../explorer';
 
 suite('Extension Test Suite', () => {
 	test('Extension activates', async () => {
@@ -38,6 +38,43 @@ suite('Extension Test Suite', () => {
 		await assert.doesNotReject(
 			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.revealBboxFile', item)),
 			'revealBboxFile should not throw when invoked with BoxTreeItem',
+		);
+	});
+
+	test('removeAllBoxes can be invoked with no arguments without throwing', async () => {
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes')),
+			'removeAllBoxes should not throw when invoked with no selection',
+		);
+	});
+
+	test('removeAllBoxes can be invoked with BoundingBoxesGroupItem argument without throwing', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const imageUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all.png');
+		const bboxUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all.txt');
+		const item = new BoundingBoxesGroupItem(imageUri, bboxUri, folder);
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes', item)),
+			'removeAllBoxes should not throw when invoked with BoundingBoxesGroupItem',
+		);
+	});
+
+	test('removeAllBoxes can be invoked with ProjectTreeItem (imageWithBbox) argument without throwing', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const imageUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all-image.png');
+		const bboxUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all-image.txt');
+		const item = new ProjectTreeItem(imageUri, bboxUri, folder);
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes', item)),
+			'removeAllBoxes should not throw when invoked with ProjectTreeItem',
 		);
 	});
 });

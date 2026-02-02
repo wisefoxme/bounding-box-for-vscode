@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Context menu **Delete All** on the "Bounding boxes" aggregation item in the Project view; prompts for confirmation and shows the number of bounding boxes to be deleted.
 - Command **Bounding Box Editor: Set file format** in the command palette to set the workspace bounding box file format (COCO, YOLO, or Pascal VOC) via a quick-pick.
 
 ### Changed
