@@ -5,3 +5,4 @@ node_modules
 .vscode-test/
 coverage/
 *.vsix
+e2e-sample.png

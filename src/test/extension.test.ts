@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { BoxTreeItem, ProjectTreeItem, BoundingBoxesGroupItem } from '../explorer';
+import { createOnBboxSaved } from '../extension';
 
 suite('Extension Test Suite', () => {
 	test('Extension activates', async () => {
@@ -15,11 +16,17 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(ext.isActive, true);
 	});
 
-	test('setBboxFormat command can be invoked without throwing', async () => {
-		await assert.doesNotReject(
-			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.setBboxFormat')),
-			'setBboxFormat command should be registered and invocable',
-		);
+	test('setBboxFormat command can be invoked without throwing', async function () {
+		this.timeout(3000);
+		// When a workspace folder is open, the command shows a QuickPick and does not resolve until the user picks.
+		// Race with a short timeout: if the command completes (no workspace) or we timeout (picker open), it was invocable.
+		const result = await Promise.race([
+			vscode.commands.executeCommand('bounding-box-editor.setBboxFormat'),
+			new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 1500)),
+		]);
+		if (result === 'timeout') {
+			return; // Command opened UI and is waiting; consider it invocable.
+		}
 	});
 
 	test('revealBboxFile can be invoked with BoxTreeItem argument without throwing', async () => {
@@ -76,5 +83,15 @@ suite('Extension Test Suite', () => {
 			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes', item)),
 			'removeAllBoxes should not throw when invoked with ProjectTreeItem',
 		);
+	});
+
+	test('createOnBboxSaved only refreshes bbox section (not project tree)', async () => {
+		let refreshCount = 0;
+		const mockBboxSection = { refresh: () => { refreshCount++; } };
+		const onBboxSaved = createOnBboxSaved(mockBboxSection);
+		onBboxSaved();
+		await new Promise((r) => setTimeout(r, 0));
+		await new Promise((r) => setTimeout(r, 60));
+		assert.strictEqual(refreshCount, 2, 'bbox section refresh should be called twice (deferred + 50ms)');
 	});
 });

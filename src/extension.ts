@@ -22,12 +22,57 @@ const HAS_BOX_SELECTED_CONTEXT = 'boundingBoxEditor.hasBoxSelected';
 const BBOX_SECTION_BOX_SELECTED_CONTEXT = 'boundingBoxEditor.bboxSectionBoxSelected';
 const BBOX_SECTION_MULTIPLE_BOXES_SELECTED_CONTEXT = 'boundingBoxEditor.bboxSectionMultipleBoxesSelected';
 
+/** Creates the callback used when a bbox file is saved. Only refreshes the Bounding Boxes section (deferred). Exported for tests. */
+export function createOnBboxSaved(bboxSectionProvider: { refresh(): void }): () => void {
+	return () => {
+		setTimeout(() => {
+			bboxSectionProvider.refresh();
+			setTimeout(() => bboxSectionProvider.refresh(), 50);
+		}, 0);
+	};
+}
+
+let _editorProvider: BoundingBoxEditorProvider | undefined;
+let _bboxSectionProvider: BboxSectionTreeDataProvider | undefined;
+
+/** Returns the editor provider after activation; for tests only. */
+export function getEditorProvider(): BoundingBoxEditorProvider | undefined {
+	return _editorProvider;
+}
+
+/** Returns the bbox section tree data provider after activation; for tests only. */
+export function getBboxSectionProvider(): BboxSectionTreeDataProvider | undefined {
+	return _bboxSectionProvider;
+}
+
+let _testWriteBboxFile: ((uri: vscode.Uri, content: string) => Promise<void>) | undefined;
+
+/** Sets a callback used instead of writing bbox files to disk when in test mode; for E2E tests. */
+export function setTestWriteBboxFile(
+	fn: ((uri: vscode.Uri, content: string) => Promise<void>) | undefined,
+): void {
+	_testWriteBboxFile = fn;
+}
+
+/** For E2E tests: set the selected image and refresh the bbox section provider. */
+export function setTestSelectedImageUri(uri: vscode.Uri | undefined): void {
+	setSelectedImageUri(uri);
+	_bboxSectionProvider?.refresh();
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	const dimensionsByImageUri = new Map<string, { width: number; height: number }>();
 	const getDimensions = (uri: vscode.Uri): { width: number; height: number } | undefined =>
 		dimensionsByImageUri.get(uri.toString());
 
-	const bboxSectionProvider = new BboxSectionTreeDataProvider({ getDimensions });
+	let getLiveBoxes: (uri: vscode.Uri) => Bbox[] | undefined = () => undefined;
+	let resolveImageUri: (uri: vscode.Uri) => vscode.Uri | undefined = () => undefined;
+	const bboxSectionProvider = new BboxSectionTreeDataProvider({
+		getDimensions,
+		getLiveBoxes: (uri) => getLiveBoxes(uri),
+		resolveImageUri: (uri) => resolveImageUri(uri),
+	});
+	_bboxSectionProvider = bboxSectionProvider;
 	const editorSelectionByUri = new Map<string, number[]>();
 
 	const { provider: projectProvider, treeView: projectTreeView } = registerExplorer(
@@ -44,6 +89,12 @@ export function activate(context: vscode.ExtensionContext) {
 		projectProvider.refresh();
 		bboxSectionProvider.refresh();
 	};
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('bounding-box-editor.refreshView', () => {
+			refreshTrees();
+		}),
+	);
 
 	async function revealBoxInProjectTree(imageUri: vscode.Uri, selectedBoxIndex: number): Promise<void> {
 		const rootItems = await projectProvider.getChildren(undefined);
@@ -62,7 +113,13 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	const editorProvider = new BoundingBoxEditorProvider(context, {
-		onBboxSaved: refreshTrees,
+		onBboxSaved: createOnBboxSaved(bboxSectionProvider),
+		onBoxesChanged: () => {
+			setTimeout(() => {
+				bboxSectionProvider.refresh();
+				setTimeout(() => bboxSectionProvider.refresh(), 50);
+			}, 0);
+		},
 		onDimensionsReceived: (imageUri: vscode.Uri, width: number, height: number) => {
 			if (width > 0 && height > 0) {
 				dimensionsByImageUri.set(imageUri.toString(), { width, height });
@@ -74,6 +131,18 @@ export function activate(context: vscode.ExtensionContext) {
 			setSelectedImageUri(imageUri);
 			bboxSectionProvider.refresh();
 		},
+		onRequestLabelForNewBox:
+			context.extensionMode === vscode.ExtensionMode.Test
+				? async () => undefined
+				: async (_imageUri: vscode.Uri, bboxIndex: number) => {
+						const value = `Box ${bboxIndex + 1}`;
+						const result = await vscode.window.showInputBox({
+							title: 'Label for new bounding box',
+							value,
+							prompt: 'Enter a label for the new box (leave empty for default).',
+						});
+						return result === undefined ? undefined : (result.trim() === '' ? undefined : result.trim());
+					},
 		onSelectionChanged: (imageUri: vscode.Uri, selectedBoxIndices: number[]) => {
 			setSelectedBoxIndices(selectedBoxIndices);
 			editorSelectionByUri.set(imageUri.toString(), selectedBoxIndices);
@@ -95,7 +164,14 @@ export function activate(context: vscode.ExtensionContext) {
 				active && indices !== undefined && indices.length > 0,
 			);
 		},
+		getWriteBboxFile:
+			context.extensionMode === vscode.ExtensionMode.Test
+				? () => _testWriteBboxFile
+				: undefined,
 	});
+	getLiveBoxes = (uri: vscode.Uri) => editorProvider.getBoxesForImage(uri);
+	resolveImageUri = (uri: vscode.Uri) => editorProvider.getDocumentUriForImage(uri);
+	_editorProvider = editorProvider;
 
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider(
@@ -384,10 +460,10 @@ export function activate(context: vscode.ExtensionContext) {
 				void vscode.window.showInformationMessage('No bounding box file found for this image.');
 				return;
 			}
+			await vscode.window.showTextDocument(bboxUri);
 			try {
 				await vscode.commands.executeCommand('revealInExplorer', bboxUri);
 			} catch {
-				await vscode.window.showTextDocument(bboxUri);
 				await vscode.commands.executeCommand('revealInExplorer');
 			}
 		}),
@@ -429,6 +505,13 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage('Hello World from bounding-box-editor!');
 	});
 	context.subscriptions.push(disposable);
+
+	return {
+		getEditorProvider,
+		getBboxSectionProvider,
+		setTestWriteBboxFile,
+		setTestSelectedImageUri,
+	};
 }
 
 export function deactivate() {}

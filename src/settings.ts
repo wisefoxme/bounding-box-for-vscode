@@ -250,7 +250,13 @@ export async function readMergedBboxContent(
 
 	const firstContent = readContents[0]?.content ?? null;
 	const detected = firstContent ? detect(firstContent) : null;
-	const provider = detected ?? getProvider(settings.bboxFormat) ?? getProvider('coco')!;
+	// If a non-default format is explicitly configured, use that. Otherwise prefer detection, then configured format.
+	const isDefaultFormat = settings.bboxFormat === 'coco';
+	const provider =
+		(!isDefaultFormat ? getProvider(settings.bboxFormat) : null) ||
+		detected ||
+		getProvider(settings.bboxFormat) ||
+		getProvider('coco')!;
 	setProviderForImage(imageUri, provider);
 
 	const useDimensions =

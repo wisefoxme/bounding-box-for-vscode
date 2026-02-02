@@ -55,4 +55,15 @@ suite('editorProvider', () => {
 		assert.ok(html.includes('removeBoxAt') || html.includes('removeBoxAtIndices'), 'script should handle remove message');
 		assert.ok(html.includes('renameBoxAt'), 'script should handle renameBoxAt message');
 	});
+
+	test('getWebviewHtml sends boxes with dirty', () => {
+		const html = getWebviewHtml('x', [], 'y', 'coco');
+		assert.ok(html.includes("type: 'dirty', boxes: boxes"), 'script should send boxes with dirty');
+	});
+
+	test('getWebviewHtml includes requestLabelForNewBox after draw and addBox', () => {
+		const html = getWebviewHtml('x', [], 'y', 'coco');
+		assert.ok(html.includes('requestLabelForNewBox'), 'script should post requestLabelForNewBox');
+		assert.ok(html.includes('bboxIndex: boxes.length - 1'), 'script should send bboxIndex for new box');
+	});
 });

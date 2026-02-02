@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { getBboxUriForImage, getBboxExtension, getDefaultBoundingBoxes, getSettings, readMergedBboxContent } from './settings';
 import type { Bbox } from './bbox';
@@ -9,10 +11,14 @@ export const ADD_BOX_ON_OPEN_PREFIX = 'addBoxOnOpen_';
 
 export interface BoundingBoxEditorProviderOptions {
 	onBboxSaved?: (imageUri: vscode.Uri) => void;
+	onBoxesChanged?: (imageUri: vscode.Uri) => void;
 	onDimensionsReceived?: (imageUri: vscode.Uri, width: number, height: number) => void;
 	onEditorOpened?: (imageUri: vscode.Uri) => void;
+	onRequestLabelForNewBox?: (imageUri: vscode.Uri, bboxIndex: number) => Promise<string | undefined>;
 	onSelectionChanged?: (imageUri: vscode.Uri, selectedBoxIndices: number[]) => void;
 	onEditorViewStateChange?: (imageUri: vscode.Uri, active: boolean) => void;
+	/** When provided (e.g. in tests), called instead of writing to disk for bbox file. */
+	getWriteBboxFile?: () => ((uri: vscode.Uri, content: string) => Promise<void>) | undefined;
 }
 
 class BoundingBoxDocument implements vscode.CustomDocument {
@@ -38,6 +44,7 @@ function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
 
 export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<BoundingBoxDocument> {
 	private readonly _panelsByUri = new Map<string, vscode.WebviewPanel>();
+	private readonly _documentsByUri = new Map<string, BoundingBoxDocument>();
 	private readonly _onDidChangeCustomDocument = new vscode.EventEmitter<vscode.CustomDocumentContentChangeEvent<BoundingBoxDocument>>();
 	readonly onDidChangeCustomDocument = this._onDidChangeCustomDocument.event;
 	private readonly _pendingSaveResolvers = new Map<string, (boxes: Bbox[]) => void>();
@@ -47,15 +54,103 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 		private readonly _options: BoundingBoxEditorProviderOptions = {},
 	) {}
 
+	/** Resolve map key for a URI; try direct toString, normalized file path, then match by realpath so E2E/test URIs match. */
+	private _keyForUri(uri: vscode.Uri): string | undefined {
+		const k = uri.toString();
+		if (this._documentsByUri.has(k)) {
+			return k;
+		}
+		if (uri.scheme === 'file') {
+			const normalized = vscode.Uri.file(uri.fsPath).toString();
+			if (this._documentsByUri.has(normalized)) {
+				return normalized;
+			}
+			let uriResolved: string;
+			try {
+				uriResolved = fs.realpathSync(uri.fsPath);
+			} catch {
+				uriResolved = path.normalize(uri.fsPath);
+			}
+			for (const [key, doc] of this._documentsByUri) {
+				let docResolved: string;
+				try {
+					docResolved = fs.realpathSync(doc.uri.fsPath);
+				} catch {
+					docResolved = path.normalize(doc.uri.fsPath);
+				}
+				if (docResolved === uriResolved) {
+					return key;
+				}
+			}
+		}
+		return undefined;
+	}
+
 	postMessageToEditor(imageUri: vscode.Uri, msg: unknown): void {
-		const panel = this._panelsByUri.get(imageUri.toString());
+		const key = this._keyForUri(imageUri) ?? imageUri.toString();
+		const panel = this._panelsByUri.get(key);
 		if (panel) {
 			panel.webview.postMessage(msg);
 		}
 	}
 
 	hasEditorOpen(imageUri: vscode.Uri): boolean {
-		return this._panelsByUri.has(imageUri.toString());
+		return this._keyForUri(imageUri) !== undefined;
+	}
+
+	getBoxesForImage(imageUri: vscode.Uri): Bbox[] | undefined {
+		const key = this._keyForUri(imageUri);
+		return key ? this._documentsByUri.get(key)?.boxes : undefined;
+	}
+
+	/** Returns the document URI for an image if the editor has it open (e.g. for E2E tests to align selected image URI). */
+	getDocumentUriForImage(uri: vscode.Uri): vscode.Uri | undefined {
+		let uriResolved: string | undefined;
+		try {
+			uriResolved = fs.realpathSync(uri.fsPath);
+		} catch {
+			uriResolved = path.normalize(uri.fsPath);
+		}
+		for (const doc of this._documentsByUri.values()) {
+			let docResolved: string;
+			try {
+				docResolved = fs.realpathSync(doc.uri.fsPath);
+			} catch {
+				docResolved = path.normalize(doc.uri.fsPath);
+			}
+			if (docResolved === uriResolved) {
+				return doc.uri;
+			}
+		}
+		return undefined;
+	}
+
+	/** Writes document.boxes to disk and updates document.bboxContent. Resolves when done; shows error on failure. */
+	private async _writeBoxesToDiskAndNotify(document: BoundingBoxDocument): Promise<void> {
+		if (
+			document.formatProvider.id === 'yolo' &&
+			(document.imgWidth <= 0 || document.imgHeight <= 0)
+		) {
+			void vscode.window.showErrorMessage(
+				'Cannot save YOLO bounding boxes: image dimensions not yet available. Wait for the image to load.',
+			);
+			return;
+		}
+		try {
+			const serialized = document.formatProvider.serialize(
+				document.boxes,
+				document.imgWidth,
+				document.imgHeight,
+			);
+			await vscode.workspace.fs.writeFile(
+				document.bboxUri,
+				new TextEncoder().encode(serialized),
+			);
+			document.bboxContent = serialized;
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${errMsg}`);
+		}
 	}
 
 	async openCustomDocument(
@@ -105,8 +200,10 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 		_token: vscode.CancellationToken,
 	): Promise<void> {
 		this._panelsByUri.set(document.uri.toString(), webviewPanel);
+		this._documentsByUri.set(document.uri.toString(), document);
 		webviewPanel.onDidDispose(() => {
 			this._panelsByUri.delete(document.uri.toString());
+			this._documentsByUri.delete(document.uri.toString());
 			this._pendingSaveResolvers.delete(document.uri.toString());
 			this._options.onDimensionsReceived?.(document.uri, 0, 0);
 		});
@@ -143,7 +240,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 		updateWebview();
 
 		webviewPanel.webview.onDidReceiveMessage(
-			async (msg: { type: string; boxes?: Bbox[]; imgWidth?: number; imgHeight?: number; selectedBoxIndices?: number[] }) => {
+			async (msg: { type: string; boxes?: Bbox[]; bboxIndex?: number; imgWidth?: number; imgHeight?: number; selectedBoxIndices?: number[] }) => {
 				if (msg.type === 'init' && msg.imgWidth !== undefined && msg.imgHeight !== undefined) {
 					document.imgWidth = msg.imgWidth;
 					document.imgHeight = msg.imgHeight;
@@ -165,7 +262,23 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 					return;
 				}
 				if (msg.type === 'dirty') {
-					this._onDidChangeCustomDocument.fire({ document });
+					if (Array.isArray(msg.boxes)) {
+						document.boxes = msg.boxes;
+						void this._writeBoxesToDiskAndNotify(document).then(() => {
+							this._options.onBoxesChanged?.(document.uri);
+							this._options.onBboxSaved?.(document.uri);
+						});
+					} else {
+						this._onDidChangeCustomDocument.fire({ document });
+					}
+					return;
+				}
+				if (msg.type === 'requestLabelForNewBox' && typeof msg.bboxIndex === 'number') {
+					const bboxIndex = msg.bboxIndex;
+					void this._options.onRequestLabelForNewBox?.(document.uri, bboxIndex).then((label) => {
+						const resolved = label ?? `Box ${bboxIndex + 1}`;
+						webviewPanel.webview.postMessage({ type: 'renameBoxAt', bboxIndex, label: resolved });
+					});
 					return;
 				}
 				if (msg.type === 'save' && Array.isArray(msg.boxes)) {
@@ -200,7 +313,12 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 		try {
 			document.boxes = boxes;
 			const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
-			await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
+			const write = this._options.getWriteBboxFile?.();
+			if (write) {
+				await write(document.bboxUri, serialized);
+			} else {
+				await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
+			}
 			document.bboxContent = serialized;
 			this._options.onBboxSaved?.(document.uri);
 		} catch (err) {
@@ -230,7 +348,12 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 		}
 		try {
 			const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
-			await vscode.workspace.fs.writeFile(destination, new TextEncoder().encode(serialized));
+			const write = this._options.getWriteBboxFile?.();
+			if (write) {
+				await write(destination, serialized);
+			} else {
+				await vscode.workspace.fs.writeFile(destination, new TextEncoder().encode(serialized));
+			}
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${errMsg}`);
@@ -514,7 +637,7 @@ export function getWebviewHtml(
 			if (e.button !== 0) return;
 			if (drag) {
 				drag = null;
-				vscode.postMessage({ type: 'dirty' });
+				vscode.postMessage({ type: 'dirty', boxes: boxes });
 				return;
 			}
 			if (drawStart !== null) {
@@ -531,8 +654,9 @@ export function getWebviewHtml(
 					boxes.push({ x_min, y_min, width, height });
 					selectedBoxIndices = [boxes.length - 1];
 					draw();
-					vscode.postMessage({ type: 'dirty' });
+					vscode.postMessage({ type: 'dirty', boxes: boxes });
 					notifySelectionChanged();
+					vscode.postMessage({ type: 'requestLabelForNewBox', bboxIndex: boxes.length - 1 });
 				}
 			}
 		});
@@ -561,8 +685,9 @@ export function getWebviewHtml(
 					boxes.push({ x_min, y_min, width: w, height: h });
 					selectedBoxIndices = [boxes.length - 1];
 					draw();
-					vscode.postMessage({ type: 'dirty' });
+					vscode.postMessage({ type: 'dirty', boxes: boxes });
 					notifySelectionChanged();
+					vscode.postMessage({ type: 'requestLabelForNewBox', bboxIndex: boxes.length - 1 });
 				}
 			}
 			if (d && d.type === 'removeBoxAt' && typeof d.bboxIndex === 'number') {
@@ -571,7 +696,7 @@ export function getWebviewHtml(
 					boxes.splice(i, 1);
 					selectedBoxIndices = selectedBoxIndices.filter(function(x){ return x !== i; }).map(function(x){ return x > i ? x - 1 : x; });
 					draw();
-					vscode.postMessage({ type: 'dirty' });
+					vscode.postMessage({ type: 'dirty', boxes: boxes });
 					notifySelectionChanged();
 				}
 			}
@@ -583,7 +708,7 @@ export function getWebviewHtml(
 				}
 				selectedBoxIndices = [];
 				draw();
-				vscode.postMessage({ type: 'dirty' });
+				vscode.postMessage({ type: 'dirty', boxes: boxes });
 				notifySelectionChanged();
 			}
 			if (d && d.type === 'renameBoxAt' && typeof d.bboxIndex === 'number' && typeof d.label === 'string') {
@@ -591,7 +716,7 @@ export function getWebviewHtml(
 				if (i >= 0 && i < boxes.length) {
 					boxes[i] = Object.assign({}, boxes[i], { label: d.label });
 					draw();
-					vscode.postMessage({ type: 'dirty' });
+					vscode.postMessage({ type: 'dirty', boxes: boxes });
 				}
 			}
 		});
@@ -603,7 +728,7 @@ export function getWebviewHtml(
 			boxes.splice(i, 1);
 			selectedBoxIndices = selectedBoxIndices.filter(function(x){ return x !== i; }).map(function(x){ return x > i ? x - 1 : x; });
 			draw();
-			vscode.postMessage({ type: 'dirty' });
+			vscode.postMessage({ type: 'dirty', boxes: boxes });
 			notifySelectionChanged();
 		});
 
@@ -617,7 +742,7 @@ export function getWebviewHtml(
 			}
 			selectedBoxIndices = [];
 			draw();
-			vscode.postMessage({ type: 'dirty' });
+			vscode.postMessage({ type: 'dirty', boxes: boxes });
 			notifySelectionChanged();
 			e.preventDefault();
 		});

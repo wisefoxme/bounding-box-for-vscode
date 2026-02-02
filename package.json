@@ -166,27 +166,31 @@
       {
         "command": "bounding-box-editor.setBboxFormat",
         "title": "Bounding Box Editor: Set file format"
+      },
+      {
+        "command": "bounding-box-editor.refreshView",
+        "title": "Refresh",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "command": "bounding-box-editor.removeBox",
-          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
-          "group": "navigation"
-        },
-        {
-          "command": "bounding-box-editor.removeSelectedBoxes",
-          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionMultipleBoxesSelected",
-          "group": "navigation"
-        },
-        {
-          "command": "bounding-box-editor.renameBox",
-          "when": "view == boundingBoxEditor.bboxSectionView && boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
-          "group": "navigation"
-        }
-      ],
+      "view/title": [],
       "view/item/context": [
+        {
+          "command": "bounding-box-editor.refreshView",
+          "when": "view == boundingBoxEditor.projectView",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.refreshView",
+          "when": "view == boundingBoxEditor.bboxSectionView",
+          "group": "inline"
+        },
+        {
+          "command": "bounding-box-editor.removeAllBoxes",
+          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "group": "inline"
+        },
         {
           "command": "bounding-box-editor.removeAllBoxes",
           "when": "view == boundingBoxEditor.projectView && viewItem == bboxGroup",

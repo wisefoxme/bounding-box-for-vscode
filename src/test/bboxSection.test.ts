@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import type { Bbox } from '../bbox';
 import { BboxSectionTreeDataProvider, BboxSectionPlaceholderItem } from '../bboxSection';
 import { BoxTreeItem } from '../explorer';
 import {
@@ -113,6 +114,29 @@ suite('bboxSection', () => {
 				// ignore
 			}
 		}
+	});
+
+	test('getChildren(undefined) uses getLiveBoxes when it returns an array', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'live-boxes-test.png');
+		const liveBoxes: Bbox[] = [
+			{ x_min: 0, y_min: 0, width: 10, height: 10, label: 'live1' },
+			{ x_min: 20, y_min: 20, width: 30, height: 30, label: 'live2' },
+		];
+		const providerWithLive = new BboxSectionTreeDataProvider({
+			getLiveBoxes: (uri) => (uri.toString() === imageUri.toString() ? liveBoxes : undefined),
+		});
+		setSelectedImageUri(imageUri);
+		const children = await providerWithLive.getChildren(undefined);
+		setSelectedImageUri(undefined);
+		assert.strictEqual(children.length, 2, 'should use live boxes');
+		assert.ok(children[0] instanceof BoxTreeItem);
+		assert.ok(children[1] instanceof BoxTreeItem);
+		assert.strictEqual((children[0] as BoxTreeItem).label, 'live1');
+		assert.strictEqual((children[1] as BoxTreeItem).label, 'live2');
 	});
 
 	test('getChildren(undefined) shows YOLO box labels when getDimensions provided', async () => {

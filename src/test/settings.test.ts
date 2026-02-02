@@ -308,12 +308,14 @@ suite('settings', () => {
 		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
 		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
 		try {
+			// Use clearly normalized YOLO coordinates (0-1 range) that won't look like Tesseract pixel coords
 			await vscode.workspace.fs.writeFile(
 				bboxUri,
-				new TextEncoder().encode('person 0.5 0.5 0.2 0.2\ncar 0.25 0.25 0.1 0.1\n'),
+				new TextEncoder().encode('person 0.05 0.05 0.02 0.02\ncar 0.25 0.25 0.1 0.1\n'),
 			);
 			const config = vscode.workspace.getConfiguration('boundingBoxEditor');
-			await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Global);
+			const previousFormat = config.get('bboxFormat');
+			await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Workspace);
 			try {
 				const withoutDims = await readMergedBboxContent(folder, imageUri);
 				assert.strictEqual(withoutDims.boxes.length, 0, 'YOLO without dimensions returns no boxes');
@@ -326,7 +328,7 @@ suite('settings', () => {
 				assert.strictEqual(withDims.boxes[0].label, 'person');
 				assert.strictEqual(withDims.boxes[1].label, 'car');
 			} finally {
-				await config.update('bboxFormat', undefined, vscode.ConfigurationTarget.Global);
+				await config.update('bboxFormat', previousFormat, vscode.ConfigurationTarget.Workspace);
 			}
 		} finally {
 			try {
