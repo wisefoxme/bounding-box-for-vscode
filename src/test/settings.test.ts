@@ -9,6 +9,7 @@ import {
 	getBboxUriForImage,
 	getBboxCandidateUris,
 	getDefaultBoundingBoxes,
+	getPrimaryBboxUriForImage,
 	readMergedBboxContent,
 } from '../settings';
 
@@ -178,6 +179,30 @@ suite('settings', () => {
 		const imageDir = imageUri.fsPath.replace(/\/[^/]+$/, '');
 		const bboxDir = bboxUri.fsPath.replace(/\/[^/]+$/, '');
 		assert.strictEqual(bboxDir, imageDir, 'bbox file should be in same directory as image when bboxDirectory is empty');
+	});
+
+	test('getPrimaryBboxUriForImage returns first existing file in allowed order', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('allowedBoundingBoxFileExtensions', ['.txt', '.box'], vscode.ConfigurationTarget.Global);
+		const base = `test-primary-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const boxUri = vscode.Uri.joinPath(folder.uri, `${base}.box`);
+		try {
+			await vscode.workspace.fs.writeFile(boxUri, new TextEncoder().encode('a 0 0 10 10'));
+			const primary = await getPrimaryBboxUriForImage(folder, imageUri);
+			assert.strictEqual(primary.fsPath, boxUri.fsPath, 'should return existing .box when .txt does not exist');
+		} finally {
+			await config.update('allowedBoundingBoxFileExtensions', undefined, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.fs.delete(boxUri);
+			} catch {
+				// ignore
+			}
+		}
 	});
 
 	test('getDefaultBoundingBoxes returns empty when no config or empty array', () => {

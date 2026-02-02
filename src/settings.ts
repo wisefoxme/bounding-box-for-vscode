@@ -118,21 +118,49 @@ export function getAllowedBoundingBoxFileExtensions(scope?: vscode.Configuration
 	);
 }
 
-export function getBboxUriForImage(
+function getBboxUriForImageWithExtension(
 	workspaceFolder: vscode.WorkspaceFolder,
 	imageUri: vscode.Uri,
+	ext: string,
 	scope?: vscode.ConfigurationScope,
 ): vscode.Uri {
 	const bboxDirSetting = (vscode.workspace.getConfiguration(SECTION, scope).get<string>('bboxDirectory') ?? '').trim();
 	const base = imageUri.path.replace(/\.[^/.]+$/, '');
 	const baseName = base.split('/').pop() ?? '';
-	const ext = getBboxExtension(scope);
 	if (!bboxDirSetting) {
 		const imageDir = path.dirname(imageUri.fsPath);
 		return vscode.Uri.joinPath(vscode.Uri.file(imageDir), baseName + ext);
 	}
 	const bboxDir = getBboxDirUri(workspaceFolder, scope);
 	return vscode.Uri.joinPath(bboxDir, baseName + ext);
+}
+
+export function getBboxUriForImage(
+	workspaceFolder: vscode.WorkspaceFolder,
+	imageUri: vscode.Uri,
+	scope?: vscode.ConfigurationScope,
+): vscode.Uri {
+	return getBboxUriForImageWithExtension(workspaceFolder, imageUri, getBboxExtension(scope), scope);
+}
+
+/** First existing bbox file for the image (by allowed extension order), or the default path if none exist. */
+export async function getPrimaryBboxUriForImage(
+	workspaceFolder: vscode.WorkspaceFolder,
+	imageUri: vscode.Uri,
+	scope?: vscode.ConfigurationScope,
+): Promise<vscode.Uri> {
+	const allowed = getAllowedBoundingBoxFileExtensions(scope);
+	const extList = allowed.length === 0 || allowed.includes('*') ? ['.txt'] : allowed;
+	for (const ext of extList) {
+		const uri = getBboxUriForImageWithExtension(workspaceFolder, imageUri, ext, scope);
+		try {
+			await vscode.workspace.fs.stat(uri);
+			return uri;
+		} catch {
+			// continue to next extension
+		}
+	}
+	return getBboxUriForImage(workspaceFolder, imageUri, scope);
 }
 
 function getBboxDirOrImageDirUri(

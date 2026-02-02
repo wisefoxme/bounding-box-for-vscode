@@ -8,7 +8,7 @@ import {
 	setSelectedBoxIndices,
 	getSelectedBoxIndices,
 } from './selectedImage';
-import { getBboxUriForImage, getSettings } from './settings';
+import { getPrimaryBboxUriForImage, getSettings } from './settings';
 import { getProviderForImage, getProvider } from './formatProviders';
 import type { Bbox } from './bbox';
 import {
@@ -148,7 +148,7 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!imageUri) {return;}
 			const folder = vscode.workspace.getWorkspaceFolder(imageUri);
 			if (!folder) {return;}
-			const bboxUri = getBboxUriForImage(folder, imageUri);
+			const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
 			await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(''));
 			refreshTrees();
 			editorProvider.postMessageToEditor(imageUri, { type: 'boxes', boxes: [] });
@@ -185,7 +185,7 @@ export function activate(context: vscode.ExtensionContext) {
 			editorProvider.postMessageToEditor(imageUri, { type: 'removeBoxAtIndices', bboxIndices: indices });
 			return;
 		}
-		const bboxUri = getBboxUriForImage(folder, imageUri);
+		const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
 		let content: string;
 		try {
 			content = new TextDecoder().decode(await vscode.workspace.fs.readFile(bboxUri));
@@ -216,7 +216,7 @@ export function activate(context: vscode.ExtensionContext) {
 				void vscode.window.showErrorMessage('Failed to rename bounding box: Image is not in a workspace folder.');
 				return;
 			}
-			const bboxUri = getBboxUriForImage(folder, imageUri);
+			const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
 			const settings = getSettings();
 			const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
 			if (!provider) {
@@ -347,7 +347,7 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!imageUri) {return;}
 			const folder = vscode.workspace.getWorkspaceFolder(imageUri);
 			if (!folder) {return;}
-			const bboxUri = getBboxUriForImage(folder, imageUri);
+			const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
 			try {
 				await vscode.workspace.fs.stat(bboxUri);
 			} catch {
