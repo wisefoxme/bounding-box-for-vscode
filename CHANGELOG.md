@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Command **Bounding Box Editor: Set file format** in the command palette to set the workspace bounding box file format (COCO, YOLO, or Pascal VOC) via a quick-pick.
+
+### Changed
+
+- Floating-point precision when saving box coordinates is now derived from the source image size: decimal places = number of digits in the larger of width or height, capped at 8 (e.g. 1920×1080 → 4 decimals; 100×50 → 3). When dimensions are unknown or zero, 2 decimal places are used.
+- Bounding box file output no longer adds a trailing newline (COCO, YOLO, Pascal VOC, Tesseract .box); none of these formats require it by spec.
+- Canvas edits (move, add, delete, rename boxes) no longer write to the bbox file immediately. The file is written only when the user runs **Save** (e.g. Cmd+S / Ctrl+S). The editor shows as dirty until saved; Revert and Save As are supported.
+
 ### Fixed
 
 - YOLO box labels are now shown in the Bounding Boxes section and Project tree (previously showed generic "Box 1", "Box 2").

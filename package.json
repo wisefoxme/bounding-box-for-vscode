@@ -162,6 +162,10 @@
         "command": "bounding-box-editor.revealBboxFile",
         "title": "Reveal in file explorer",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "bounding-box-editor.setBboxFormat",
+        "title": "Bounding Box Editor: Set file format"
       }
     ],
     "menus": {
@@ -220,6 +224,9 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "bounding-box-editor.setBboxFormat"
+        },
         {
           "command": "bounding-box-editor.renameBoundingBox",
           "when": "boundingBoxEditor.hasBoxSelected"

@@ -91,6 +91,15 @@ export function getSettings(scope?: vscode.ConfigurationScope): BoundingBoxEdito
 	};
 }
 
+/** Set bbox format for the given scope (e.g. workspace folder). Writes to workspace settings. */
+export async function setBboxFormat(
+	scope: vscode.ConfigurationScope | undefined,
+	format: BboxFormat,
+): Promise<void> {
+	const config = vscode.workspace.getConfiguration(SECTION, scope);
+	await config.update('bboxFormat', format, vscode.ConfigurationTarget.Workspace);
+}
+
 export function getImageDirUri(workspaceFolder: vscode.WorkspaceFolder, scope?: vscode.ConfigurationScope): vscode.Uri {
 	const { imageDirectory } = getSettings(scope);
 	const segments = imageDirectory.replace(/\\/g, '/').split('/').filter(Boolean);

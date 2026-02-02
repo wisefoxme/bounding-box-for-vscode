@@ -25,9 +25,17 @@ suite('formatProviders', () => {
 		});
 		test('serialize round-trip', () => {
 			const boxes: Bbox[] = [{ x_min: 1, y_min: 2, width: 3, height: 4, label: 'a' }];
-			const s = cocoProvider.serialize(boxes);
+			const s = cocoProvider.serialize(boxes, 0, 0);
 			const back = cocoProvider.parse(s);
 			assert.deepStrictEqual(back, boxes);
+		});
+		test('serialize with dimensions uses image-based decimal places', () => {
+			const boxes: Bbox[] = [{ x_min: 10.5, y_min: 20, width: 30, height: 40 }];
+			const s = cocoProvider.serialize(boxes, 100, 100);
+			const back = cocoProvider.parse(s);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].x_min, 10.5);
+			assert.strictEqual(back[0].y_min, 20);
 		});
 		test('detect returns true for COCO-style content', () => {
 			assert.strictEqual(cocoProvider.detect('10 20 30 40\n50 60 70 80'), true);
@@ -67,13 +75,21 @@ suite('formatProviders', () => {
 		});
 		test('serialize round-trip', () => {
 			const boxes: Bbox[] = [{ x_min: 10, y_min: 20, width: 30, height: 40 }];
-			const s = pascalVocProvider.serialize(boxes);
+			const s = pascalVocProvider.serialize(boxes, 0, 0);
 			const back = pascalVocProvider.parse(s);
 			assert.strictEqual(back.length, 1);
 			assert.strictEqual(back[0].x_min, boxes[0].x_min);
 			assert.strictEqual(back[0].y_min, boxes[0].y_min);
 			assert.strictEqual(back[0].width, boxes[0].width);
 			assert.strictEqual(back[0].height, boxes[0].height);
+		});
+		test('serialize with dimensions uses image-based decimal places', () => {
+			const boxes: Bbox[] = [{ x_min: 10.25, y_min: 20, width: 30, height: 40 }];
+			const s = pascalVocProvider.serialize(boxes, 100, 100);
+			const back = pascalVocProvider.parse(s);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].x_min, 10.25);
+			assert.strictEqual(back[0].width, 30);
 		});
 		test('detect returns true for x_max > x_min lines', () => {
 			assert.strictEqual(pascalVocProvider.detect('10 20 40 60\n0 0 10 10'), true);
@@ -109,7 +125,7 @@ suite('formatProviders', () => {
 			const boxes: Bbox[] = [
 				{ x_min: 10, y_min: 20, width: 30, height: 40, label: 'word' },
 			];
-			const s = tesseractBoxProvider.serialize(boxes);
+			const s = tesseractBoxProvider.serialize(boxes, 0, 0);
 			const back = tesseractBoxProvider.parse(s);
 			assert.strictEqual(back.length, 1);
 			assert.strictEqual(back[0].label, 'word');

@@ -15,6 +15,13 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(ext.isActive, true);
 	});
 
+	test('setBboxFormat command can be invoked without throwing', async () => {
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.setBboxFormat')),
+			'setBboxFormat command should be registered and invocable',
+		);
+	});
+
 	test('revealBboxFile can be invoked with BoxTreeItem argument without throwing', async () => {
 		const ext = vscode.extensions.getExtension('vscode.bounding-box-editor');
 		const resolved = ext ?? vscode.extensions.all.find((e) => e.id.includes('bounding-box'));

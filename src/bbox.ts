@@ -1,5 +1,22 @@
 import type { BboxFormat } from './settings';
 
+const DECIMAL_PLACES_FALLBACK = 2;
+const DECIMAL_PLACES_CAP = 8;
+
+/** Decimal places for coordinates = digit count of max(width, height), capped at 8. Zero dimensions use fallback. */
+export function decimalPlacesForImage(imgWidth: number, imgHeight: number): number {
+	const maxDim = Math.max(0, imgWidth, imgHeight);
+	if (maxDim === 0) {
+		return DECIMAL_PLACES_FALLBACK;
+	}
+	const digits = String(Math.floor(maxDim)).length;
+	return Math.min(DECIMAL_PLACES_CAP, digits);
+}
+
+export function formatCoord(value: number, decimals: number): string {
+	return value.toFixed(decimals);
+}
+
 export interface Bbox {
 	x_min: number;
 	y_min: number;
@@ -34,10 +51,14 @@ export function parseCoco(content: string): Bbox[] {
 	return boxes;
 }
 
-export function serializeCoco(boxes: Bbox[]): string {
+export function serializeCoco(boxes: Bbox[], imgWidth = 0, imgHeight = 0): string {
+	const decimals = decimalPlacesForImage(imgWidth, imgHeight);
 	return boxes
-		.map((b) => (b.label !== undefined && b.label !== null ? `${b.x_min} ${b.y_min} ${b.width} ${b.height} ${b.label}` : `${b.x_min} ${b.y_min} ${b.width} ${b.height}`))
-		.join('\n') + (boxes.length ? '\n' : '');
+		.map((b) => {
+			const coords = `${formatCoord(b.x_min, decimals)} ${formatCoord(b.y_min, decimals)} ${formatCoord(b.width, decimals)} ${formatCoord(b.height, decimals)}`;
+			return b.label !== undefined && b.label !== null ? `${coords} ${b.label}` : coords;
+		})
+		.join('\n');
 }
 
 /** YOLO: class x_center y_center width height (normalized 0-1). */
@@ -70,6 +91,7 @@ export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number
 	if (imgWidth <= 0 || imgHeight <= 0) {
 		return '';
 	}
+	const decimals = decimalPlacesForImage(imgWidth, imgHeight);
 	return boxes
 		.map((b) => {
 			const x_center = (b.x_min + b.width / 2) / imgWidth;
@@ -77,9 +99,9 @@ export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number
 			const w = b.width / imgWidth;
 			const h = b.height / imgHeight;
 			const cls = b.label ?? '0';
-			return `${cls} ${x_center} ${y_center} ${w} ${h}`;
+			return `${cls} ${formatCoord(x_center, decimals)} ${formatCoord(y_center, decimals)} ${formatCoord(w, decimals)} ${formatCoord(h, decimals)}`;
 		})
-		.join('\n') + (boxes.length ? '\n' : '');
+		.join('\n');
 }
 
 /** Pascal VOC: x_min y_min x_max y_max [label]. */
@@ -107,14 +129,16 @@ export function parsePascalVoc(content: string): Bbox[] {
 	return boxes;
 }
 
-export function serializePascalVoc(boxes: Bbox[]): string {
+export function serializePascalVoc(boxes: Bbox[], imgWidth = 0, imgHeight = 0): string {
+	const decimals = decimalPlacesForImage(imgWidth, imgHeight);
 	return boxes
 		.map((b) => {
 			const x_max = b.x_min + b.width;
 			const y_max = b.y_min + b.height;
-			return (b.label !== undefined && b.label !== null ? `${b.x_min} ${b.y_min} ${x_max} ${y_max} ${b.label}` : `${b.x_min} ${b.y_min} ${x_max} ${y_max}`);
+			const coords = `${formatCoord(b.x_min, decimals)} ${formatCoord(b.y_min, decimals)} ${formatCoord(x_max, decimals)} ${formatCoord(y_max, decimals)}`;
+			return b.label !== undefined && b.label !== null ? `${coords} ${b.label}` : coords;
 		})
-		.join('\n') + (boxes.length ? '\n' : '');
+		.join('\n');
 }
 
 export function parseBbox(content: string, format: BboxFormat, imgWidth: number, imgHeight: number): Bbox[] {
@@ -133,12 +157,12 @@ export function parseBbox(content: string, format: BboxFormat, imgWidth: number,
 export function serializeBbox(boxes: Bbox[], format: BboxFormat, imgWidth: number, imgHeight: number): string {
 	switch (format) {
 		case 'coco':
-			return serializeCoco(boxes);
+			return serializeCoco(boxes, imgWidth, imgHeight);
 		case 'yolo':
 			return serializeYolo(boxes, imgWidth, imgHeight);
 		case 'pascal_voc':
-			return serializePascalVoc(boxes);
+			return serializePascalVoc(boxes, imgWidth, imgHeight);
 		default:
-			return serializeCoco(boxes);
+			return serializeCoco(boxes, imgWidth, imgHeight);
 	}
 }

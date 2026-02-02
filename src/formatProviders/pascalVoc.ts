@@ -7,8 +7,8 @@ export const pascalVocProvider: BboxFormatProvider = {
 	parse(content: string, _imgWidth?: number, _imgHeight?: number): Bbox[] {
 		return parsePascalVoc(content);
 	},
-	serialize(boxes: Bbox[]): string {
-		return serializePascalVoc(boxes);
+	serialize(boxes: Bbox[], imgWidth?: number, imgHeight?: number): string {
+		return serializePascalVoc(boxes, imgWidth ?? 0, imgHeight ?? 0);
 	},
 	detect(content: string): boolean {
 		const lines = content.trim().split(/\r?\n/).filter(Boolean);

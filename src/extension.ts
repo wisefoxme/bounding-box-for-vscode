@@ -8,7 +8,8 @@ import {
 	setSelectedBoxIndices,
 	getSelectedBoxIndices,
 } from './selectedImage';
-import { getPrimaryBboxUriForImage, getSettings } from './settings';
+import { getPrimaryBboxUriForImage, getSettings, setBboxFormat } from './settings';
+import type { BboxFormat } from './settings';
 import { getProviderForImage, getProvider } from './formatProviders';
 import type { Bbox } from './bbox';
 import {
@@ -359,6 +360,38 @@ export function activate(context: vscode.ExtensionContext) {
 			} catch {
 				await vscode.window.showTextDocument(bboxUri);
 				await vscode.commands.executeCommand('revealInExplorer');
+			}
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('bounding-box-editor.setBboxFormat', async () => {
+			const folder = vscode.workspace.workspaceFolders?.[0];
+			if (!folder) {
+				void vscode.window.showInformationMessage(
+					'Open a workspace folder to set the bounding box file format.',
+				);
+				return;
+			}
+			const current = getSettings(folder).bboxFormat;
+			const options: { label: string; format: BboxFormat }[] = [
+				{ label: 'COCO (x_min y_min width height)', format: 'coco' },
+				{ label: 'YOLO (normalized 0–1)', format: 'yolo' },
+				{ label: 'Pascal VOC (x_min y_min x_max y_max)', format: 'pascal_voc' },
+			];
+			const items = options.map((o) => ({
+				label: o.label,
+				format: o.format,
+				description: o.format === current ? '(current)' : undefined,
+			}));
+			const picked = await vscode.window.showQuickPick(items, {
+				title: 'Bounding box file format',
+				placeHolder: 'Select the format for bounding box files in this workspace',
+				matchOnDescription: true,
+			});
+			if (picked) {
+				await setBboxFormat(folder, picked.format);
+				void vscode.window.showInformationMessage(`Bounding box format set to ${picked.format}.`);
 			}
 		}),
 	);

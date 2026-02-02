@@ -36,8 +36,11 @@ function resolveBboxUri(imageUri: vscode.Uri): vscode.Uri | undefined {
 	return getBboxUriForImage(folder, imageUri);
 }
 
-export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorProvider<BoundingBoxDocument> {
+export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<BoundingBoxDocument> {
 	private readonly _panelsByUri = new Map<string, vscode.WebviewPanel>();
+	private readonly _onDidChangeCustomDocument = new vscode.EventEmitter<vscode.CustomDocumentContentChangeEvent<BoundingBoxDocument>>();
+	readonly onDidChangeCustomDocument = this._onDidChangeCustomDocument.event;
+	private readonly _pendingSaveResolvers = new Map<string, (boxes: Bbox[]) => void>();
 
 	constructor(
 		private readonly _context: vscode.ExtensionContext,
@@ -104,6 +107,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		this._panelsByUri.set(document.uri.toString(), webviewPanel);
 		webviewPanel.onDidDispose(() => {
 			this._panelsByUri.delete(document.uri.toString());
+			this._pendingSaveResolvers.delete(document.uri.toString());
 			this._options.onDimensionsReceived?.(document.uri, 0, 0);
 		});
 		webviewPanel.onDidChangeViewState(() => {
@@ -160,36 +164,111 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 					}
 					return;
 				}
+				if (msg.type === 'dirty') {
+					this._onDidChangeCustomDocument.fire({ document });
+					return;
+				}
 				if (msg.type === 'save' && Array.isArray(msg.boxes)) {
-					try {
-						if (
-							document.formatProvider.id === 'yolo' &&
-							(document.imgWidth <= 0 || document.imgHeight <= 0)
-						) {
-							void vscode.window.showErrorMessage(
-								'Cannot save YOLO bounding boxes: image dimensions not yet available. Wait for the image to load.',
-							);
-							return;
-						}
-						document.boxes = msg.boxes;
-						const serialized = document.formatProvider.serialize(
-							msg.boxes,
-							document.imgWidth,
-							document.imgHeight,
-						);
-						await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
-						document.bboxContent = serialized;
-						this._options.onBboxSaved?.(document.uri);
-					} catch (err) {
-						const errMsg = err instanceof Error ? err.message : String(err);
-						void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${errMsg}`);
+					const resolve = this._pendingSaveResolvers.get(document.uri.toString());
+					if (resolve) {
+						resolve(msg.boxes);
 					}
+					return;
 				}
 				if (msg.type === 'selectionChanged' && Array.isArray(msg.selectedBoxIndices)) {
 					this._options.onSelectionChanged?.(document.uri, msg.selectedBoxIndices);
 				}
 			},
 		);
+	}
+
+	async saveCustomDocument(document: BoundingBoxDocument, _cancellation: vscode.CancellationToken): Promise<void> {
+		const boxes = await new Promise<Bbox[]>((resolve) => {
+			this._pendingSaveResolvers.set(document.uri.toString(), resolve);
+			this.postMessageToEditor(document.uri, { type: 'requestSave' });
+		});
+		this._pendingSaveResolvers.delete(document.uri.toString());
+		if (
+			document.formatProvider.id === 'yolo' &&
+			(document.imgWidth <= 0 || document.imgHeight <= 0)
+		) {
+			void vscode.window.showErrorMessage(
+				'Cannot save YOLO bounding boxes: image dimensions not yet available. Wait for the image to load.',
+			);
+			return;
+		}
+		try {
+			document.boxes = boxes;
+			const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
+			await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
+			document.bboxContent = serialized;
+			this._options.onBboxSaved?.(document.uri);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${errMsg}`);
+		}
+	}
+
+	async saveCustomDocumentAs(
+		document: BoundingBoxDocument,
+		destination: vscode.Uri,
+		_cancellation: vscode.CancellationToken,
+	): Promise<void> {
+		const boxes = await new Promise<Bbox[]>((resolve) => {
+			this._pendingSaveResolvers.set(document.uri.toString(), resolve);
+			this.postMessageToEditor(document.uri, { type: 'requestSave' });
+		});
+		this._pendingSaveResolvers.delete(document.uri.toString());
+		if (
+			document.formatProvider.id === 'yolo' &&
+			(document.imgWidth <= 0 || document.imgHeight <= 0)
+		) {
+			void vscode.window.showErrorMessage(
+				'Cannot save YOLO bounding boxes: image dimensions not yet available. Wait for the image to load.',
+			);
+			return;
+		}
+		try {
+			const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
+			await vscode.workspace.fs.writeFile(destination, new TextEncoder().encode(serialized));
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${errMsg}`);
+		}
+	}
+
+	async revertCustomDocument(document: BoundingBoxDocument, _cancellation: vscode.CancellationToken): Promise<void> {
+		try {
+			const buf = await vscode.workspace.fs.readFile(document.bboxUri);
+			document.bboxContent = new TextDecoder().decode(buf);
+			document.boxes = document.formatProvider.parse(
+				document.bboxContent,
+				document.imgWidth,
+				document.imgHeight,
+			);
+			const panel = this._panelsByUri.get(document.uri.toString());
+			if (panel) {
+				panel.webview.postMessage({ type: 'boxes', boxes: document.boxes });
+			}
+		} catch {
+			// leave document as-is if revert read fails
+		}
+	}
+
+	async backupCustomDocument(
+		document: BoundingBoxDocument,
+		context: vscode.CustomDocumentBackupContext,
+		_cancellation: vscode.CancellationToken,
+	): Promise<vscode.CustomDocumentBackup> {
+		const boxes = await new Promise<Bbox[]>((resolve) => {
+			this._pendingSaveResolvers.set(document.uri.toString(), resolve);
+			this.postMessageToEditor(document.uri, { type: 'requestSave' });
+		});
+		this._pendingSaveResolvers.delete(document.uri.toString());
+		const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
+		const backupUri = context.destination;
+		await vscode.workspace.fs.writeFile(backupUri, new TextEncoder().encode(serialized));
+		return { id: backupUri.toString(), delete: () => vscode.workspace.fs.delete(backupUri) };
 	}
 }
 
@@ -435,7 +514,7 @@ export function getWebviewHtml(
 			if (e.button !== 0) return;
 			if (drag) {
 				drag = null;
-				vscode.postMessage({ type: 'save', boxes: boxes });
+				vscode.postMessage({ type: 'dirty' });
 				return;
 			}
 			if (drawStart !== null) {
@@ -452,7 +531,7 @@ export function getWebviewHtml(
 					boxes.push({ x_min, y_min, width, height });
 					selectedBoxIndices = [boxes.length - 1];
 					draw();
-					vscode.postMessage({ type: 'save', boxes: boxes });
+					vscode.postMessage({ type: 'dirty' });
 					notifySelectionChanged();
 				}
 			}
@@ -469,6 +548,10 @@ export function getWebviewHtml(
 			const d = e.data;
 			if (d && d.type === 'boxes') { boxes = d.boxes || []; draw(); }
 			if (d && d.type === 'selectedBoxIndices' && Array.isArray(d.selectedBoxIndices)) { selectedBoxIndices = d.selectedBoxIndices.slice(); draw(); }
+			if (d && d.type === 'requestSave') {
+				vscode.postMessage({ type: 'save', boxes: boxes });
+				return;
+			}
 			if (d && d.type === 'addBox') {
 				if (imgWidth > 0 && imgHeight > 0) {
 					const w = Math.max(50, Math.floor(imgWidth * 0.1));
@@ -478,7 +561,7 @@ export function getWebviewHtml(
 					boxes.push({ x_min, y_min, width: w, height: h });
 					selectedBoxIndices = [boxes.length - 1];
 					draw();
-					vscode.postMessage({ type: 'save', boxes });
+					vscode.postMessage({ type: 'dirty' });
 					notifySelectionChanged();
 				}
 			}
@@ -488,7 +571,7 @@ export function getWebviewHtml(
 					boxes.splice(i, 1);
 					selectedBoxIndices = selectedBoxIndices.filter(function(x){ return x !== i; }).map(function(x){ return x > i ? x - 1 : x; });
 					draw();
-					vscode.postMessage({ type: 'save', boxes });
+					vscode.postMessage({ type: 'dirty' });
 					notifySelectionChanged();
 				}
 			}
@@ -500,7 +583,7 @@ export function getWebviewHtml(
 				}
 				selectedBoxIndices = [];
 				draw();
-				vscode.postMessage({ type: 'save', boxes });
+				vscode.postMessage({ type: 'dirty' });
 				notifySelectionChanged();
 			}
 			if (d && d.type === 'renameBoxAt' && typeof d.bboxIndex === 'number' && typeof d.label === 'string') {
@@ -508,7 +591,7 @@ export function getWebviewHtml(
 				if (i >= 0 && i < boxes.length) {
 					boxes[i] = Object.assign({}, boxes[i], { label: d.label });
 					draw();
-					vscode.postMessage({ type: 'save', boxes });
+					vscode.postMessage({ type: 'dirty' });
 				}
 			}
 		});
@@ -520,7 +603,7 @@ export function getWebviewHtml(
 			boxes.splice(i, 1);
 			selectedBoxIndices = selectedBoxIndices.filter(function(x){ return x !== i; }).map(function(x){ return x > i ? x - 1 : x; });
 			draw();
-			vscode.postMessage({ type: 'save', boxes });
+			vscode.postMessage({ type: 'dirty' });
 			notifySelectionChanged();
 		});
 
@@ -534,7 +617,7 @@ export function getWebviewHtml(
 			}
 			selectedBoxIndices = [];
 			draw();
-			vscode.postMessage({ type: 'save', boxes });
+			vscode.postMessage({ type: 'dirty' });
 			notifySelectionChanged();
 			e.preventDefault();
 		});

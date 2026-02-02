@@ -11,6 +11,7 @@ import {
 	getDefaultBoundingBoxes,
 	getPrimaryBboxUriForImage,
 	readMergedBboxContent,
+	setBboxFormat,
 } from '../settings';
 
 suite('settings', () => {
@@ -179,6 +180,25 @@ suite('settings', () => {
 		const imageDir = imageUri.fsPath.replace(/\/[^/]+$/, '');
 		const bboxDir = bboxUri.fsPath.replace(/\/[^/]+$/, '');
 		assert.strictEqual(bboxDir, imageDir, 'bbox file should be in same directory as image when bboxDirectory is empty');
+	});
+
+	test('setBboxFormat updates workspace bboxFormat and getSettings reflects it', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor', folder);
+		const original = config.get<string>('bboxFormat') ?? 'coco';
+		try {
+			await setBboxFormat(folder, 'yolo');
+			const settings = getSettings(folder);
+			assert.strictEqual(settings.bboxFormat, 'yolo');
+			await setBboxFormat(folder, 'pascal_voc');
+			const settings2 = getSettings(folder);
+			assert.strictEqual(settings2.bboxFormat, 'pascal_voc');
+		} finally {
+			await config.update('bboxFormat', original, vscode.ConfigurationTarget.Workspace);
+		}
 	});
 
 	test('getPrimaryBboxUriForImage returns first existing file in allowed order', async () => {
