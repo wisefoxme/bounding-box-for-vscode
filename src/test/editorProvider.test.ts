@@ -1,5 +1,6 @@
 import * as assert from 'assert';
-import { getWebviewHtml } from '../editorProvider';
+import * as vscode from 'vscode';
+import { BoundingBoxEditorProvider, getWebviewHtml } from '../editorProvider';
 import type { Bbox } from '../bbox';
 
 suite('editorProvider', () => {
@@ -65,5 +66,114 @@ suite('editorProvider', () => {
 		const html = getWebviewHtml('x', [], 'y', 'coco');
 		assert.ok(html.includes('requestLabelForNewBox'), 'script should post requestLabelForNewBox');
 		assert.ok(html.includes('bboxIndex: boxes.length - 1'), 'script should send bboxIndex for new box');
+	});
+
+	test('dirty message with boxes updates document.boxes and calls onBoxesChanged', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, `dirty-test-${Date.now()}.png`);
+		const onBoxesChangedCalls: vscode.Uri[] = [];
+		let messageListener: (msg: { type: string; boxes?: Bbox[] }) => void = () => {};
+		const mockWebview = {
+			onDidReceiveMessage: (listener: (msg: { type: string; boxes?: Bbox[] }) => void) => {
+				messageListener = listener;
+				return { dispose: () => {} };
+			},
+			postMessage: () => {},
+			asWebviewUri: (uri: vscode.Uri) => uri,
+			html: '',
+			options: {} as vscode.WebviewOptions,
+		};
+		const mockPanel = {
+			webview: mockWebview,
+			onDidDispose: () => ({ dispose: () => {} }),
+			onDidChangeViewState: () => ({ dispose: () => {} }),
+			active: true,
+		} as unknown as vscode.WebviewPanel;
+		const mockContext = {
+			workspaceState: { get: () => undefined, update: () => {} },
+			subscriptions: [] as { dispose(): void }[],
+		} as unknown as vscode.ExtensionContext;
+		const provider = new BoundingBoxEditorProvider(mockContext, {
+			onBoxesChanged: (uri) => onBoxesChangedCalls.push(uri),
+			getWriteBboxFile: () => async () => {},
+		});
+		const doc = await provider.openCustomDocument(
+			imageUri,
+			{} as vscode.CustomDocumentOpenContext,
+			new vscode.CancellationTokenSource().token,
+		);
+		await provider.resolveCustomEditor(
+			doc,
+			mockPanel,
+			new vscode.CancellationTokenSource().token,
+		);
+		const newBoxes: Bbox[] = [{ x_min: 0, y_min: 0, width: 100, height: 100 }];
+		messageListener({ type: 'dirty', boxes: newBoxes });
+		assert.strictEqual(onBoxesChangedCalls.length, 1, 'onBoxesChanged called once');
+		assert.strictEqual(onBoxesChangedCalls[0].toString(), doc.uri.toString(), 'onBoxesChanged called with document URI');
+		const liveBoxes = provider.getBoxesForImage(doc.uri);
+		assert.ok(liveBoxes, 'getBoxesForImage returns array');
+		assert.strictEqual(liveBoxes!.length, 1, 'one box');
+		assert.strictEqual(liveBoxes![0].x_min, 0);
+		assert.strictEqual(liveBoxes![0].width, 100);
+	});
+
+	test('requestLabelForNewBox updates document box label and calls onBoxesChanged', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, `rename-test-${Date.now()}.png`);
+		const onBoxesChangedCalls: vscode.Uri[] = [];
+		let messageListener: (msg: { type: string; boxes?: Bbox[]; bboxIndex?: number }) => void = () => {};
+		const mockWebview = {
+			onDidReceiveMessage: (listener: (msg: { type: string; boxes?: Bbox[]; bboxIndex?: number }) => void) => {
+				messageListener = listener;
+				return { dispose: () => {} };
+			},
+			postMessage: () => {},
+			asWebviewUri: (uri: vscode.Uri) => uri,
+			html: '',
+			options: {} as vscode.WebviewOptions,
+		};
+		const mockPanel = {
+			webview: mockWebview,
+			onDidDispose: () => ({ dispose: () => {} }),
+			onDidChangeViewState: () => ({ dispose: () => {} }),
+			active: true,
+		} as unknown as vscode.WebviewPanel;
+		const mockContext = {
+			workspaceState: { get: () => undefined, update: () => {} },
+			subscriptions: [] as { dispose(): void }[],
+		} as unknown as vscode.ExtensionContext;
+		const provider = new BoundingBoxEditorProvider(mockContext, {
+			onBoxesChanged: (uri) => onBoxesChangedCalls.push(uri),
+			onRequestLabelForNewBox: () => Promise.resolve('My Label'),
+			getWriteBboxFile: () => async () => {},
+		});
+		const doc = await provider.openCustomDocument(
+			imageUri,
+			{} as vscode.CustomDocumentOpenContext,
+			new vscode.CancellationTokenSource().token,
+		);
+		await provider.resolveCustomEditor(
+			doc,
+			mockPanel,
+			new vscode.CancellationTokenSource().token,
+		);
+		messageListener({ type: 'dirty', boxes: [{ x_min: 0, y_min: 0, width: 50, height: 50 }] });
+		assert.strictEqual(provider.getBoxesForImage(doc.uri)?.length, 1, 'one box after dirty');
+		onBoxesChangedCalls.length = 0;
+		messageListener({ type: 'requestLabelForNewBox', bboxIndex: 0 });
+		await new Promise((r) => setTimeout(r, 20));
+		assert.strictEqual(onBoxesChangedCalls.length, 1, 'onBoxesChanged called once after rename');
+		assert.strictEqual(onBoxesChangedCalls[0].toString(), doc.uri.toString(), 'onBoxesChanged called with document URI');
+		const liveBoxes = provider.getBoxesForImage(doc.uri);
+		assert.ok(liveBoxes, 'getBoxesForImage returns array');
+		assert.strictEqual(liveBoxes!.length, 1, 'one box');
+		assert.strictEqual(liveBoxes![0].label, 'My Label', 'document box has resolved label');
 	});
 });

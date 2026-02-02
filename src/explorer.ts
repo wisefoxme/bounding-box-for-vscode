@@ -13,11 +13,7 @@ export class ProjectTreeItem extends vscode.TreeItem {
 		public readonly bboxUri: vscode.Uri | undefined,
 		public readonly workspaceFolder: vscode.WorkspaceFolder,
 	) {
-		const collapsible =
-			bboxUri !== undefined
-				? vscode.TreeItemCollapsibleState.Collapsed
-				: vscode.TreeItemCollapsibleState.None;
-		super(imageUri, collapsible);
+		super(imageUri, vscode.TreeItemCollapsibleState.None);
 		this.contextValue = bboxUri ? 'imageWithBbox' : 'imageOnly';
 		this.tooltip = imageUri.fsPath + (bboxUri ? `\nBbox: ${bboxUri.fsPath}` : '\nNo bbox file');
 		this.iconPath = new vscode.ThemeIcon('file-media');
@@ -84,6 +80,7 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 	private readonly _getDimensions?: GetDimensions;
 	private _onDidChangeTreeData = new vscode.EventEmitter<ExplorerTreeItem | undefined | void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+	private _projectItemByUri = new Map<string, ProjectTreeItem>();
 
 	constructor(options?: { getDimensions?: GetDimensions }) {
 		this._getDimensions = options?.getDimensions;
@@ -91,6 +88,13 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 
 	refresh(): void {
 		this._onDidChangeTreeData.fire();
+	}
+
+	refreshForImage(imageUri: vscode.Uri): void {
+		const projectItem = this._projectItemByUri.get(imageUri.toString());
+		if (projectItem) {
+			this._onDidChangeTreeData.fire(projectItem);
+		}
 	}
 
 	getTreeItem(element: ExplorerTreeItem): vscode.TreeItem {
@@ -115,6 +119,7 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 
 		if (element === undefined) {
 			const items: ProjectTreeItem[] = [];
+			this._projectItemByUri.clear();
 			for (const folder of folders) {
 				const imageDir = getImageDirUri(folder);
 				const pattern = new vscode.RelativePattern(imageDir, IMAGE_GLOB);
@@ -131,17 +136,16 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 							// continue
 						}
 					}
-					items.push(new ProjectTreeItem(imageUri, primary, folder));
+					const projectItem = new ProjectTreeItem(imageUri, primary, folder);
+					items.push(projectItem);
+					this._projectItemByUri.set(imageUri.toString(), projectItem);
 				}
 			}
 			return items.sort((a, b) => a.imageUri.fsPath.localeCompare(b.imageUri.fsPath));
 		}
 
 		if (isProjectTreeItem(element)) {
-			if (element.bboxUri === undefined) {
-				return [];
-			}
-			return [new BoundingBoxesGroupItem(element.imageUri, element.bboxUri, element.workspaceFolder, element)];
+			return [];
 		}
 
 		if (isBoundingBoxesGroupItem(element)) {

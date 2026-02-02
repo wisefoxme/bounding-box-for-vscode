@@ -68,10 +68,13 @@ function parseDefaultBoundingBoxes(raw: unknown): Bbox[] {
 
 export type BboxFormat = 'coco' | 'yolo' | 'pascal_voc';
 
+export type YoloLabelPosition = 'first' | 'last';
+
 export interface BoundingBoxEditorSettings {
 	imageDirectory: string;
 	bboxDirectory: string;
 	bboxFormat: BboxFormat;
+	yoloLabelPosition: YoloLabelPosition;
 	allowedBoundingBoxFileExtensions: string[];
 }
 
@@ -80,6 +83,7 @@ export function getSettings(scope?: vscode.ConfigurationScope): BoundingBoxEdito
 	const imageDirectory = (config.get<string>('imageDirectory') ?? '.').trim() || '.';
 	const bboxDirectory = (config.get<string>('bboxDirectory') ?? '').trim();
 	const bboxFormat = (config.get<BboxFormat>('bboxFormat') ?? 'coco');
+	const yoloLabelPosition = (config.get<YoloLabelPosition>('yoloLabelPosition') ?? 'last');
 	const allowedBoundingBoxFileExtensions = parseAllowedBoundingBoxFileExtensions(
 		config.get<unknown>('allowedBoundingBoxFileExtensions'),
 	);
@@ -87,6 +91,7 @@ export function getSettings(scope?: vscode.ConfigurationScope): BoundingBoxEdito
 		imageDirectory,
 		bboxDirectory: bboxDirectory || imageDirectory,
 		bboxFormat,
+		yoloLabelPosition,
 		allowedBoundingBoxFileExtensions,
 	};
 }

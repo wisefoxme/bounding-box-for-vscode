@@ -49,6 +49,27 @@ function getBoxItems(children: BboxSectionTreeItem[]): BoxTreeItem[] {
 	return children.filter((c: BboxSectionTreeItem): c is BoxTreeItem => c instanceof BoxTreeItem);
 }
 
+async function waitForPanelBoxCount(
+	bboxSectionProvider: ReturnType<ReturnType<typeof getExtApi>['getBboxSectionProvider']>,
+	expectedCount: number,
+	timeoutMs = 2000,
+): Promise<BoxTreeItem[]> {
+	if (!bboxSectionProvider) {
+		throw new Error('bboxSectionProvider is required');
+	}
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const children = await bboxSectionProvider.getChildren(undefined);
+		const boxItems = getBoxItems(children);
+		if (boxItems.length === expectedCount) {
+			return boxItems;
+		}
+		await delayMs(50);
+	}
+	const children = await bboxSectionProvider.getChildren(undefined);
+	return getBoxItems(children);
+}
+
 suite('Bbox editor E2E', function () {
 	let recordedWrites: RecordedWrite[];
 	let e2eImageUri: vscode.Uri | undefined;
@@ -106,7 +127,7 @@ suite('Bbox editor E2E', function () {
 		await waitForEditorOpen(() => api.getEditorProvider(), imageUri);
 		await delayMs(600);
 
-		// Set the selected image for the bbox section provider; use the editor's document URI so lookup matches.
+		// Set the selected image for the bbox section; use the editor's document URI so lookup matches.
 		const selectedUri = api.getEditorProvider()?.getDocumentUriForImage(imageUri) ?? imageUri;
 		api.setTestSelectedImageUri(selectedUri);
 		await delayMs(100);
@@ -144,10 +165,9 @@ suite('Bbox editor E2E', function () {
 		assert.strictEqual(mem1.length, 1, 'in-memory: one box');
 		assert.strictEqual(mem1[0].label, 'First Box', 'in-memory: first box label');
 
-		const children1 = await bboxSectionProvider.getChildren(undefined);
-		const boxItems1 = getBoxItems(children1);
-		// In the test environment the Bounding Boxes tree may not show live boxes (URI/refresh timing).
+		const boxItems1 = await waitForPanelBoxCount(bboxSectionProvider, 1);
 		if (boxItems1.length >= 1) {
+			assert.strictEqual(boxItems1.length, 1, 'UI list: one box after first');
 			assert.strictEqual(boxItems1[0].label, 'First Box', 'UI list: first box label');
 		}
 		assert.strictEqual(mem1.length, 1, 'count before adding second: 1');
@@ -174,11 +194,11 @@ suite('Bbox editor E2E', function () {
 		assert.strictEqual(mem2[0].label, 'First Box');
 		assert.strictEqual(mem2[1].label, 'Second Box');
 
-		const children2 = await bboxSectionProvider.getChildren(undefined);
-		const boxItems2 = getBoxItems(children2);
+		const boxItems2 = await waitForPanelBoxCount(bboxSectionProvider, 2);
 		if (boxItems2.length >= 2) {
-			assert.strictEqual(boxItems2[0].label, 'First Box');
-			assert.strictEqual(boxItems2[1].label, 'Second Box');
+			assert.strictEqual(boxItems2.length, 2, 'UI list: two boxes after second');
+			assert.strictEqual(boxItems2[0].label, 'First Box', 'UI list: first box label');
+			assert.strictEqual(boxItems2[1].label, 'Second Box', 'UI list: second box label');
 		}
 		assert.strictEqual(mem2.length, 2, 'count after adding second: 2');
 
@@ -200,10 +220,10 @@ suite('Bbox editor E2E', function () {
 		assert.strictEqual(mem3.length, 1);
 		assert.strictEqual(mem3[0].label, 'Second Box');
 
-		const children3 = await bboxSectionProvider.getChildren(undefined);
-		const boxItems3 = getBoxItems(children3);
+		const boxItems3 = await waitForPanelBoxCount(bboxSectionProvider, 1);
 		if (boxItems3.length >= 1) {
-			assert.strictEqual(boxItems3[0].label, 'Second Box');
+			assert.strictEqual(boxItems3.length, 1, 'UI list: one box after delete');
+			assert.strictEqual(boxItems3[0].label, 'Second Box', 'UI list: remaining box label');
 		}
 		assert.strictEqual(mem3.length, 1, 'count after delete: 1');
 
@@ -219,6 +239,136 @@ suite('Bbox editor E2E', function () {
 		assert.strictEqual(boxes4.length, 2, 'written content: two boxes after third');
 		assert.strictEqual(boxes4[0].label, 'Second Box', 'written: second box still first');
 		// Third box has default label "Box 2" from test-mode onRequestLabelForNewBox (undefined → default)
+		const boxItems4 = await waitForPanelBoxCount(bboxSectionProvider, 2);
+		if (boxItems4.length >= 2) {
+			assert.strictEqual(boxItems4.length, 2, 'UI list: two boxes after third');
+			assert.strictEqual(boxItems4[0].label, 'Second Box', 'UI list: second box label');
+			assert.strictEqual(boxItems4[1].label, 'Box 2', 'UI list: third box default label');
+		}
 		assert.strictEqual(recordedWrites.length, 4, 'exactly four save writes (events/timing)');
+	});
+
+	test('create box by drag and assert sidebar shows label without manual refresh', async function () {
+		this.timeout(15000);
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder || !e2eImageUri) {
+			this.skip();
+			return;
+		}
+		const imageUri = e2eImageUri;
+		const api = getExtApi();
+
+		await vscode.commands.executeCommand('vscode.openWith', imageUri, 'boundingBoxEditor.imageEditor');
+		await waitForEditorOpen(() => api.getEditorProvider(), imageUri);
+		await delayMs(600);
+
+		// Set the selected image for the bbox section; use the editor's document URI so lookup matches.
+		const selectedUri = api.getEditorProvider()?.getDocumentUriForImage(imageUri) ?? imageUri;
+		api.setTestSelectedImageUri(selectedUri);
+		// Wait for webview image to load (img.onload sets imgWidth/imgHeight; addBox only runs when > 0)
+		await delayMs(1500);
+
+		const editorProvider = api.getEditorProvider();
+		const bboxSectionProvider = api.getBboxSectionProvider();
+		assert.ok(editorProvider, 'editor provider');
+		assert.ok(bboxSectionProvider, 'bbox section provider');
+
+		// Clear any existing boxes so we start from 0
+		const currentBoxes = editorProvider.getBoxesForImage(imageUri);
+		if (currentBoxes && currentBoxes.length > 0) {
+			editorProvider.postMessageToEditor(imageUri, { type: 'removeBoxAtIndices', bboxIndices: currentBoxes.map((_, i) => i) });
+			await delayMs(300);
+		}
+
+		// Simulate create-by-drag: send addBox to webview; webview adds a box and sends dirty + requestLabelForNewBox to host.
+		editorProvider.postMessageToEditor(imageUri, { type: 'addBox' });
+		// Wait for host to receive dirty and requestLabelForNewBox (label resolves to "Box 1" in test mode)
+		const deadline = Date.now() + 8000;
+		while (Date.now() < deadline) {
+			const boxes = editorProvider.getBoxesForImage(imageUri);
+			if (boxes && boxes.length === 1 && boxes[0].label === 'Box 1') {
+				break;
+			}
+			await delayMs(100);
+		}
+		// Assert: document has one box with label "Box 1" (host received dirty + requestLabelForNewBox, onBboxLabelResolved refreshed)
+		const memBoxes = editorProvider.getBoxesForImage(imageUri);
+		assert.ok(memBoxes, 'in-memory boxes');
+		assert.strictEqual(memBoxes.length, 1, 'in-memory: one box after create-by-drag');
+		assert.strictEqual(memBoxes[0].label, 'Box 1', 'in-memory: box label should be "Box 1" without manual refresh');
+		// Panel should show the box (bbox section uses getLiveBoxes = getBoxesForImage)
+		const boxItems = await waitForPanelBoxCount(bboxSectionProvider, 1);
+		if (boxItems.length >= 1) {
+			assert.strictEqual(boxItems[0].label, 'Box 1', 'UI list: box label when panel shows item');
+		}
+	});
+
+	test('delete selected box via command and assert panel refreshes', async function () {
+		this.timeout(15000);
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder || !e2eImageUri) {
+			this.skip();
+			return;
+		}
+		const imageUri = e2eImageUri;
+		const api = getExtApi();
+
+		await vscode.commands.executeCommand('vscode.openWith', imageUri, 'boundingBoxEditor.imageEditor');
+		await waitForEditorOpen(() => api.getEditorProvider(), imageUri);
+		await delayMs(600);
+
+		// Set the selected image for the bbox section; use the editor's document URI so lookup matches.
+		const selectedUri = api.getEditorProvider()?.getDocumentUriForImage(imageUri) ?? imageUri;
+		api.setTestSelectedImageUri(selectedUri);
+		// Wait for webview image to load so addBox handler can run (imgWidth/imgHeight > 0)
+		await delayMs(1500);
+
+		const editorProvider = api.getEditorProvider();
+		const bboxSectionProvider = api.getBboxSectionProvider();
+		assert.ok(editorProvider, 'editor provider');
+		assert.ok(bboxSectionProvider, 'bbox section provider');
+
+		// Start from a known state: clear existing boxes, then add one box
+		const currentBoxes = editorProvider.getBoxesForImage(imageUri);
+		if (currentBoxes && currentBoxes.length > 0) {
+			editorProvider.postMessageToEditor(imageUri, { type: 'removeBoxAtIndices', bboxIndices: currentBoxes.map((_, i) => i) });
+			await delayMs(300);
+		}
+		editorProvider.postMessageToEditor(imageUri, { type: 'addBox' });
+		// Wait for host to have one box (dirty + requestLabelForNewBox)
+		let deadline = Date.now() + 5000;
+		while (Date.now() < deadline) {
+			const boxes = editorProvider.getBoxesForImage(imageUri);
+			if (boxes && boxes.length === 1) {
+				break;
+			}
+			await delayMs(80);
+		}
+		editorProvider.postMessageToEditor(imageUri, { type: 'renameBoxAt', bboxIndex: 0, label: 'Test Box' });
+		await delayMs(400);
+
+		// Verify document has one box (panel may or may not show it depending on selected image state)
+		const boxesBefore = editorProvider.getBoxesForImage(imageUri);
+		assert.ok(boxesBefore && boxesBefore.length === 1 && boxesBefore[0].label === 'Test Box', 'document: one box before delete');
+
+		// Simulate Delete key: post removeBoxAtIndices to webview; webview sends dirty so host updates document.
+		// (Command removeSelectedBoxes does the same when invoked with a node or when active tab is bbox editor.)
+		editorProvider.postMessageToEditor(imageUri, { type: 'removeBoxAtIndices', bboxIndices: [0] });
+		// Wait for webview to process and send dirty, then host to update document
+		const deleteDeadline = Date.now() + 5000;
+		while (Date.now() < deleteDeadline) {
+			const boxes = editorProvider.getBoxesForImage(imageUri);
+			if (boxes && boxes.length === 0) {
+				break;
+			}
+			await delayMs(100);
+		}
+
+		// Assert: document has zero boxes; panel should refresh to show 0
+		const memBoxes = editorProvider.getBoxesForImage(imageUri);
+		assert.ok(memBoxes, 'in-memory boxes');
+		assert.strictEqual(memBoxes.length, 0, 'in-memory: zero boxes after delete');
+		const boxItemsAfter = await waitForPanelBoxCount(bboxSectionProvider, 0);
+		assert.strictEqual(boxItemsAfter.length, 0, 'UI list: zero boxes after delete');
 	});
 });

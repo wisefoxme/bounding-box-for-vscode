@@ -47,6 +47,10 @@ export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<Bbox
 		return element;
 	}
 
+	getParent(element: BboxSectionTreeItem): undefined {
+		return undefined;
+	}
+
 	async getChildren(element?: BboxSectionTreeItem): Promise<BboxSectionTreeItem[]> {
 		if (element !== undefined) {
 			return [];

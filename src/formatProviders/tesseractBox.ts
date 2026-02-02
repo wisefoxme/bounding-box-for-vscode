@@ -83,7 +83,7 @@ export const tesseractBoxProvider: BboxFormatProvider = {
 		}
 		return boxes;
 	},
-	serialize(boxes: Bbox[], _imgWidth?: number, _imgHeight?: number): string {
+	serialize(boxes: Bbox[], _imgWidth?: number, _imgHeight?: number, _options?: unknown): string {
 		const decimals = decimalPlacesForImage(_imgWidth ?? 0, _imgHeight ?? 0);
 		return boxes
 			.map((b) => {

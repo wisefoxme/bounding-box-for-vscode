@@ -7,7 +7,7 @@ export const pascalVocProvider: BboxFormatProvider = {
 	parse(content: string, _imgWidth?: number, _imgHeight?: number): Bbox[] {
 		return parsePascalVoc(content);
 	},
-	serialize(boxes: Bbox[], imgWidth?: number, imgHeight?: number): string {
+	serialize(boxes: Bbox[], imgWidth?: number, imgHeight?: number, _options?: unknown): string {
 		return serializePascalVoc(boxes, imgWidth ?? 0, imgHeight ?? 0);
 	},
 	detect(content: string): boolean {

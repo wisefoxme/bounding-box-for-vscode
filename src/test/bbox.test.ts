@@ -102,12 +102,47 @@ suite('bbox', () => {
 				{ x_min: 10, y_min: 20, width: 30, height: 40, label: '1' },
 			];
 			const s = serializeYolo(boxes, 100, 100);
+			assert.ok(s.endsWith(' 1'), 'YOLO serializes with label last');
 			const back = parseYolo(s, 100, 100);
 			assert.strictEqual(back.length, 1);
 			assert.strictEqual(back[0].x_min, 10);
 			assert.strictEqual(back[0].y_min, 20);
 			assert.strictEqual(back[0].width, 30);
 			assert.strictEqual(back[0].height, 40);
+			assert.strictEqual(back[0].label, '1');
+		});
+		test('serializeYolo with label first outputs class at start and round-trips', () => {
+			const boxes: Bbox[] = [
+				{ x_min: 10, y_min: 20, width: 30, height: 40, label: '1' },
+			];
+			const s = serializeYolo(boxes, 100, 100, 'first');
+			assert.ok(s.startsWith('1 '), 'YOLO with label first starts with class');
+			const back = parseYolo(s, 100, 100);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].x_min, 10);
+			assert.strictEqual(back[0].y_min, 20);
+			assert.strictEqual(back[0].width, 30);
+			assert.strictEqual(back[0].height, 40);
+			assert.strictEqual(back[0].label, '1');
+		});
+		test('parseYolo preserves multi-word label when label is last', () => {
+			const boxes = parseYolo('0.25 0.35 0.3 0.4 Drop Tower', 100, 100);
+			assert.strictEqual(boxes.length, 1);
+			assert.strictEqual(boxes[0].label, 'Drop Tower', 'multi-word label preserved');
+		});
+		test('parseYolo preserves multi-word label when class is first', () => {
+			const boxes = parseYolo('Drop Tower 0.25 0.35 0.3 0.4', 100, 100);
+			assert.strictEqual(boxes.length, 1);
+			assert.strictEqual(boxes[0].label, 'Drop Tower', 'multi-word label preserved');
+		});
+		test('serializeYolo round-trip with multi-word label', () => {
+			const boxes: Bbox[] = [
+				{ x_min: 10, y_min: 20, width: 30, height: 40, label: 'Drop Tower' },
+			];
+			const s = serializeYolo(boxes, 100, 100);
+			const back = parseYolo(s, 100, 100);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].label, 'Drop Tower', 'multi-word label round-trips');
 		});
 	});
 

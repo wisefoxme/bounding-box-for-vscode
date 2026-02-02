@@ -20,6 +20,7 @@ suite('settings', () => {
 		assert.strictEqual(typeof s.imageDirectory, 'string');
 		assert.strictEqual(typeof s.bboxDirectory, 'string');
 		assert.ok(['coco', 'yolo', 'pascal_voc'].includes(s.bboxFormat));
+		assert.strictEqual(s.yoloLabelPosition, 'last', 'yoloLabelPosition defaults to last');
 		assert.ok(Array.isArray(s.allowedBoundingBoxFileExtensions));
 	});
 	test('getBboxExtension returns .txt', () => {
@@ -198,6 +199,24 @@ suite('settings', () => {
 			assert.strictEqual(settings2.bboxFormat, 'pascal_voc');
 		} finally {
 			await config.update('bboxFormat', original, vscode.ConfigurationTarget.Workspace);
+		}
+	});
+
+	test('yoloLabelPosition defaults to last and getSettings reflects update to first', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor', folder);
+		const original = config.get<string>('yoloLabelPosition') ?? 'last';
+		try {
+			const settingsDefault = getSettings(folder);
+			assert.strictEqual(settingsDefault.yoloLabelPosition, 'last');
+			await config.update('yoloLabelPosition', 'first', vscode.ConfigurationTarget.Workspace);
+			const settingsFirst = getSettings(folder);
+			assert.strictEqual(settingsFirst.yoloLabelPosition, 'first');
+		} finally {
+			await config.update('yoloLabelPosition', original, vscode.ConfigurationTarget.Workspace);
 		}
 	});
 

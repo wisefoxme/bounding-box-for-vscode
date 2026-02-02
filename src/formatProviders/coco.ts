@@ -9,7 +9,7 @@ export const cocoProvider: BboxFormatProvider = {
 	parse(content: string, _imgWidth?: number, _imgHeight?: number): Bbox[] {
 		return parseCoco(content);
 	},
-	serialize(boxes: Bbox[], imgWidth?: number, imgHeight?: number): string {
+	serialize(boxes: Bbox[], imgWidth?: number, imgHeight?: number, _options?: unknown): string {
 		return serializeCoco(boxes, imgWidth ?? 0, imgHeight ?? 0);
 	},
 	detect(content: string): boolean {

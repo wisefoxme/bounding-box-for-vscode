@@ -61,18 +61,57 @@ export function serializeCoco(boxes: Bbox[], imgWidth = 0, imgHeight = 0): strin
 		.join('\n');
 }
 
-/** YOLO: class x_center y_center width height (normalized 0-1). */
+/** YOLO: accepts "class x_center y_center width height" (class first) and "x_center y_center width height class" (label last). Normalized 0-1. */
 export function parseYolo(content: string, imgWidth: number, imgHeight: number): Bbox[] {
 	const lines = content.trim().split(/\r?\n/).filter(Boolean);
 	const boxes: Bbox[] = [];
+	const normalized = (n: number) => Number.isFinite(n) && n >= 0 && n <= 1;
 	for (const line of lines) {
 		const parts = line.trim().split(/\s+/);
 		if (parts.length >= 5 && imgWidth > 0 && imgHeight > 0) {
-			const cls = parts[0];
-			const x_center = Number(parts[1]) * imgWidth;
-			const y_center = Number(parts[2]) * imgHeight;
-			const w = Number(parts[3]) * imgWidth;
-			const h = Number(parts[4]) * imgHeight;
+			const p0 = Number(parts[0]);
+			const p1 = Number(parts[1]);
+			const p2 = Number(parts[2]);
+			const p3 = Number(parts[3]);
+			const p4 = Number(parts[4]);
+			let cls: string;
+			let x_center: number;
+			let y_center: number;
+			let w: number;
+			let h: number;
+			const coordsFirstNormalized = normalized(p0) && normalized(p1) && normalized(p2) && normalized(p3);
+			const classFirstNormalized = normalized(p1) && normalized(p2) && normalized(p3) && normalized(p4);
+			const looksLikeClassFirst =
+				classFirstNormalized && (Number.isInteger(p0) || !normalized(p0));
+			if (looksLikeClassFirst) {
+				cls = parts[0];
+				x_center = p1 * imgWidth;
+				y_center = p2 * imgHeight;
+				w = p3 * imgWidth;
+				h = p4 * imgHeight;
+			} else if (coordsFirstNormalized) {
+				cls = parts.slice(4).join(' ');
+				x_center = p0 * imgWidth;
+				y_center = p1 * imgHeight;
+				w = p2 * imgWidth;
+				h = p3 * imgHeight;
+			} else {
+				const last4Normalized =
+					parts.length >= 5 &&
+					normalized(Number(parts[parts.length - 4])) &&
+					normalized(Number(parts[parts.length - 3])) &&
+					normalized(Number(parts[parts.length - 2])) &&
+					normalized(Number(parts[parts.length - 1]));
+				if (last4Normalized) {
+					cls = parts.slice(0, parts.length - 4).join(' ');
+					x_center = Number(parts[parts.length - 4]) * imgWidth;
+					y_center = Number(parts[parts.length - 3]) * imgHeight;
+					w = Number(parts[parts.length - 2]) * imgWidth;
+					h = Number(parts[parts.length - 1]) * imgHeight;
+				} else {
+					continue;
+				}
+			}
 			if (Number.isFinite(x_center) && Number.isFinite(y_center) && Number.isFinite(w) && Number.isFinite(h)) {
 				boxes.push({
 					x_min: x_center - w / 2,
@@ -87,7 +126,13 @@ export function parseYolo(content: string, imgWidth: number, imgHeight: number):
 	return boxes;
 }
 
-export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number): string {
+/** YOLO: normalized 0-1. labelPosition 'last' = x_center y_center width height class; 'first' = class x_center y_center width height. */
+export function serializeYolo(
+	boxes: Bbox[],
+	imgWidth: number,
+	imgHeight: number,
+	labelPosition: 'first' | 'last' = 'last',
+): string {
 	if (imgWidth <= 0 || imgHeight <= 0) {
 		return '';
 	}
@@ -99,7 +144,8 @@ export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number
 			const w = b.width / imgWidth;
 			const h = b.height / imgHeight;
 			const cls = b.label ?? '0';
-			return `${cls} ${formatCoord(x_center, decimals)} ${formatCoord(y_center, decimals)} ${formatCoord(w, decimals)} ${formatCoord(h, decimals)}`;
+			const coords = `${formatCoord(x_center, decimals)} ${formatCoord(y_center, decimals)} ${formatCoord(w, decimals)} ${formatCoord(h, decimals)}`;
+			return labelPosition === 'first' ? `${cls} ${coords}` : `${coords} ${cls}`;
 		})
 		.join('\n');
 }

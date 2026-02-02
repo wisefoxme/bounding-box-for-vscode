@@ -22,9 +22,13 @@ const HAS_BOX_SELECTED_CONTEXT = 'boundingBoxEditor.hasBoxSelected';
 const BBOX_SECTION_BOX_SELECTED_CONTEXT = 'boundingBoxEditor.bboxSectionBoxSelected';
 const BBOX_SECTION_MULTIPLE_BOXES_SELECTED_CONTEXT = 'boundingBoxEditor.bboxSectionMultipleBoxesSelected';
 
-/** Creates the callback used when a bbox file is saved. Only refreshes the Bounding Boxes section (deferred). Exported for tests. */
-export function createOnBboxSaved(bboxSectionProvider: { refresh(): void }): () => void {
-	return () => {
+/** Creates the callback used when a bbox file is saved. Refreshes the project tree for the current image and the Bounding Boxes section (deferred). Exported for tests. */
+export function createOnBboxSaved(
+	projectProvider: { refreshForImage(imageUri: vscode.Uri): void },
+	bboxSectionProvider: { refresh(): void },
+): (imageUri: vscode.Uri) => void {
+	return (imageUri: vscode.Uri) => {
+		projectProvider.refreshForImage(imageUri);
 		setTimeout(() => {
 			bboxSectionProvider.refresh();
 			setTimeout(() => bboxSectionProvider.refresh(), 50);
@@ -96,25 +100,26 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 	);
 
-	async function revealBoxInProjectTree(imageUri: vscode.Uri, selectedBoxIndex: number): Promise<void> {
-		const rootItems = await projectProvider.getChildren(undefined);
-		const projectItem = rootItems.find(
-			(el): el is ProjectTreeItem => el instanceof ProjectTreeItem && el.imageUri.toString() === imageUri.toString(),
-		);
-		if (!projectItem?.bboxUri) {return;}
-		const groupItems = await projectProvider.getChildren(projectItem);
-		const groupItem = groupItems[0];
-		if (!(groupItem instanceof BoundingBoxesGroupItem)) {return;}
-		const boxItems = await projectProvider.getChildren(groupItem);
-		const boxItem = boxItems[selectedBoxIndex];
-		if (boxItem instanceof BoxTreeItem) {
-			void projectTreeView.reveal(boxItem);
+	async function revealBoxInBboxSection(imageUri: vscode.Uri, selectedBoxIndex: number): Promise<void> {
+		setSelectedImageUri(imageUri);
+		bboxSectionProvider.refresh();
+		const children = await bboxSectionProvider.getChildren(undefined);
+		const boxItems = children.filter((c): c is BoxTreeItem => c instanceof BoxTreeItem);
+		const boxItem = boxItems.find((b) => b.bboxIndex === selectedBoxIndex && b.imageUri.toString() === imageUri.toString());
+		if (boxItem) {
+			try {
+				await bboxSectionTreeView.reveal(boxItem);
+			} catch {
+				// Reveal is best-effort; tree may have refreshed with new instances.
+			}
 		}
 	}
 
 	const editorProvider = new BoundingBoxEditorProvider(context, {
-		onBboxSaved: createOnBboxSaved(bboxSectionProvider),
-		onBoxesChanged: () => {
+		onBboxSaved: createOnBboxSaved(projectProvider, bboxSectionProvider),
+		onBoxesChanged: (imageUri: vscode.Uri) => {
+			projectProvider.refreshForImage(imageUri);
+			bboxSectionProvider.refresh();
 			setTimeout(() => {
 				bboxSectionProvider.refresh();
 				setTimeout(() => bboxSectionProvider.refresh(), 50);
@@ -143,6 +148,14 @@ export function activate(context: vscode.ExtensionContext) {
 						});
 						return result === undefined ? undefined : (result.trim() === '' ? undefined : result.trim());
 					},
+		onBboxLabelResolved: (imageUri: vscode.Uri) => {
+			projectProvider.refreshForImage(imageUri);
+			bboxSectionProvider.refresh();
+			setTimeout(() => {
+				bboxSectionProvider.refresh();
+				setTimeout(() => bboxSectionProvider.refresh(), 50);
+			}, 0);
+		},
 		onSelectionChanged: (imageUri: vscode.Uri, selectedBoxIndices: number[]) => {
 			setSelectedBoxIndices(selectedBoxIndices);
 			editorSelectionByUri.set(imageUri.toString(), selectedBoxIndices);
@@ -153,7 +166,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			bboxSectionProvider.refresh();
 			if (selectedBoxIndices.length > 0) {
-				void revealBoxInProjectTree(imageUri, selectedBoxIndices[0]);
+				void revealBoxInBboxSection(imageUri, selectedBoxIndices[0]);
 			}
 		},
 		onEditorViewStateChange: (imageUri: vscode.Uri, active: boolean) => {
@@ -183,6 +196,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const bboxSectionTreeView = vscode.window.createTreeView('boundingBoxEditor.bboxSectionView', {
 		treeDataProvider: bboxSectionProvider,
+		canSelectMany: true,
 	});
 	context.subscriptions.push(bboxSectionTreeView);
 
@@ -213,6 +227,8 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	function getImageUriForRemoveAllBoxes(): vscode.Uri | undefined {
+		const selectedImage = getSelectedImageUri();
+		if (selectedImage) {return selectedImage;}
 		const sel = projectTreeView.selection[0];
 		if (sel instanceof ProjectTreeItem) {return sel.bboxUri ? sel.imageUri : undefined;}
 		if (sel instanceof BoundingBoxesGroupItem) {return sel.imageUri;}
@@ -261,24 +277,29 @@ export function activate(context: vscode.ExtensionContext) {
 		),
 	);
 
-	async function removeSelectedBoxes(): Promise<void> {
+	async function removeSelectedBoxes(node?: BoxTreeItem | unknown): Promise<void> {
 		let imageUri: vscode.Uri | undefined;
 		let indices: number[];
-		const fromTree = getBoxTreeItemsFromSelection();
-		if (fromTree) {
-			imageUri = fromTree.imageUri;
-			indices = fromTree.indices;
+		if (node instanceof BoxTreeItem) {
+			imageUri = node.imageUri;
+			indices = [node.bboxIndex];
 		} else {
-			const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
-			const input = activeTab?.input as { resource?: vscode.Uri } | undefined;
-			imageUri = input?.resource;
-			const editorIndices = imageUri ? editorSelectionByUri.get(imageUri.toString()) : undefined;
-			indices = editorIndices ?? [];
+			const fromTree = getBoxTreeItemsFromSelection();
+			if (fromTree) {
+				imageUri = fromTree.imageUri;
+				indices = fromTree.indices;
+			} else {
+				const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+				const input = activeTab?.input as { resource?: vscode.Uri } | undefined;
+				imageUri = input?.resource;
+				const editorIndices = imageUri ? editorSelectionByUri.get(imageUri.toString()) : undefined;
+				indices = editorIndices ?? [];
+			}
 		}
 		if (!imageUri || indices.length === 0) {return;}
 		const folder = vscode.workspace.getWorkspaceFolder(imageUri);
 		if (!folder) {return;}
-		const settings = getSettings();
+		const settings = getSettings(folder);
 		const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
 		if (!provider) {return;}
 		if (provider.id === 'yolo' && !editorProvider.hasEditorOpen(imageUri)) {
@@ -303,7 +324,9 @@ export function activate(context: vscode.ExtensionContext) {
 		for (const i of sortedIndices) {
 			boxes.splice(i, 1);
 		}
-		const serialized = provider.serialize(boxes, 0, 0);
+		const serialized = provider.serialize(boxes, 0, 0, {
+			yoloLabelPosition: settings.yoloLabelPosition,
+		});
 		await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(serialized));
 		refreshTrees();
 	}
@@ -323,7 +346,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			const bboxUri = await getPrimaryBboxUriForImage(folder, imageUri);
-			const settings = getSettings();
+			const settings = getSettings(folder);
 			const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
 			if (!provider) {
 				void vscode.window.showErrorMessage('Failed to rename bounding box: No format provider available.');
@@ -372,7 +395,9 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			boxes[bboxIndex] = { ...boxes[bboxIndex], label: newLabel };
-			const serialized = provider.serialize(boxes, 0, 0);
+			const serialized = provider.serialize(boxes, 0, 0, {
+				yoloLabelPosition: settings.yoloLabelPosition,
+			});
 			try {
 				await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(serialized));
 			} catch (err) {
@@ -389,7 +414,32 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('bounding-box-editor.renameBox', async () => {
+		vscode.commands.registerCommand('bounding-box-editor.renameBox', async (node?: BoxTreeItem | unknown) => {
+			if (node instanceof BoxTreeItem) {
+				await doRenameBox(node.imageUri, node.bboxIndex);
+				return;
+			}
+			const fromTree = getBoxTreeItemsFromSelection();
+			if (fromTree && fromTree.indices.length === 1) {
+				await doRenameBox(fromTree.imageUri, fromTree.indices[0]);
+				return;
+			}
+			const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+			const input = activeTab?.input as { resource?: vscode.Uri } | undefined;
+			const imageUri = input?.resource;
+			if (!imageUri) {return;}
+			const indices = editorSelectionByUri.get(imageUri.toString());
+			if (!indices || indices.length !== 1) {return;}
+			await doRenameBox(imageUri, indices[0]);
+		}),
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('bounding-box-editor.editLabel', async (node?: BoxTreeItem | unknown) => {
+			if (node instanceof BoxTreeItem) {
+				await doRenameBox(node.imageUri, node.bboxIndex);
+				return;
+			}
 			const fromTree = getBoxTreeItemsFromSelection();
 			if (fromTree && fromTree.indices.length === 1) {
 				await doRenameBox(fromTree.imageUri, fromTree.indices[0]);

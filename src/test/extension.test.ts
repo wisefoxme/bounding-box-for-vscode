@@ -85,13 +85,28 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
-	test('createOnBboxSaved only refreshes bbox section (not project tree)', async () => {
-		let refreshCount = 0;
-		const mockBboxSection = { refresh: () => { refreshCount++; } };
-		const onBboxSaved = createOnBboxSaved(mockBboxSection);
-		onBboxSaved();
+	test('createOnBboxSaved refreshes project tree for image and bbox section', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'test.png');
+		let refreshForImageCalled = false;
+		let refreshForImageUri: vscode.Uri | undefined;
+		let bboxRefreshCount = 0;
+		const mockProjectProvider = {
+			refreshForImage: (uri: vscode.Uri) => {
+				refreshForImageCalled = true;
+				refreshForImageUri = uri;
+			},
+		};
+		const mockBboxSection = { refresh: () => { bboxRefreshCount++; } };
+		const onBboxSaved = createOnBboxSaved(mockProjectProvider, mockBboxSection);
+		onBboxSaved(imageUri);
+		assert.strictEqual(refreshForImageCalled, true, 'project provider refreshForImage should be called');
+		assert.strictEqual(refreshForImageUri?.toString(), imageUri.toString(), 'refreshForImage should be called with correct imageUri');
 		await new Promise((r) => setTimeout(r, 0));
 		await new Promise((r) => setTimeout(r, 60));
-		assert.strictEqual(refreshCount, 2, 'bbox section refresh should be called twice (deferred + 50ms)');
+		assert.strictEqual(bboxRefreshCount, 2, 'bbox section refresh should be called twice (deferred + 50ms)');
 	});
 });

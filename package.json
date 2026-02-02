@@ -2,7 +2,7 @@
   "name": "bounding-box-editor",
   "displayName": "Bounding Box Editor",
   "description": "Edit the bounding box for images from within your editor.",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "publisher": "wisefox",
   "icon": "assets/icon.png",
   "repository": {
@@ -85,6 +85,12 @@
           "default": "coco",
           "description": "Bounding box file format: coco (x_min y_min width height), yolo (normalized), pascal_voc (x_min y_min x_max y_max)."
         },
+        "boundingBoxEditor.yoloLabelPosition": {
+          "type": "string",
+          "enum": ["last", "first"],
+          "default": "last",
+          "description": "When saving YOLO format: 'last' writes class at the end of each line (x_center y_center width height class); 'first' writes class at the start (class x_center y_center width height)."
+        },
         "boundingBoxEditor.allowedBoundingBoxFileExtensions": {
           "type": "array",
           "default": [".txt"],
@@ -151,6 +157,11 @@
         "icon": "$(edit)"
       },
       {
+        "command": "bounding-box-editor.editLabel",
+        "title": "Edit label",
+        "icon": "$(edit)"
+      },
+      {
         "command": "bounding-box-editor.renameBoundingBox",
         "title": "Rename bounding box"
       },
@@ -174,13 +185,7 @@
       }
     ],
     "menus": {
-      "view/title": [],
-      "view/item/context": [
-        {
-          "command": "bounding-box-editor.refreshView",
-          "when": "view == boundingBoxEditor.projectView",
-          "group": "inline"
-        },
+      "view/title": [
         {
           "command": "bounding-box-editor.refreshView",
           "when": "view == boundingBoxEditor.bboxSectionView",
@@ -188,43 +193,35 @@
         },
         {
           "command": "bounding-box-editor.removeAllBoxes",
-          "when": "view == boundingBoxEditor.projectView && viewItem == imageWithBbox",
+          "when": "view == boundingBoxEditor.bboxSectionView",
           "group": "inline"
-        },
+        }
+      ],
+      "view/item/context": [
         {
-          "command": "bounding-box-editor.removeAllBoxes",
-          "when": "view == boundingBoxEditor.projectView && viewItem == bboxGroup",
-          "group": "inline"
-        },
-        {
-          "command": "bounding-box-editor.renameBox",
-          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
-          "group": "inline"
-        },
-        {
-          "command": "bounding-box-editor.removeBox",
-          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
-          "group": "inline"
-        },
-        {
-          "command": "bounding-box-editor.revealBboxFile",
-          "when": "view == boundingBoxEditor.projectView && viewItem == bboxItem",
+          "command": "bounding-box-editor.refreshView",
+          "when": "view == boundingBoxEditor.projectView",
           "group": "inline"
         },
         {
           "command": "bounding-box-editor.renameBox",
           "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
-          "group": "inline"
+          "group": "1_modification"
+        },
+        {
+          "command": "bounding-box-editor.editLabel",
+          "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem && !boundingBoxEditor.bboxSectionMultipleBoxesSelected",
+          "group": "1_modification"
         },
         {
           "command": "bounding-box-editor.removeBox",
           "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
-          "group": "inline"
+          "group": "1_modification"
         },
         {
           "command": "bounding-box-editor.revealBboxFile",
           "when": "view == boundingBoxEditor.bboxSectionView && viewItem == bboxItem",
-          "group": "inline"
+          "group": "2_workspace"
         }
       ],
       "commandPalette": [
@@ -244,7 +241,19 @@
           "when": "boundingBoxEditor.bboxSectionBoxSelected && !boundingBoxEditor.bboxSectionMultipleBoxesSelected"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "key": "Delete",
+        "command": "bounding-box-editor.removeSelectedBoxes",
+        "when": "boundingBoxEditor.hasBoxSelected"
+      },
+      {
+        "key": "Backspace",
+        "command": "bounding-box-editor.removeSelectedBoxes",
+        "when": "boundingBoxEditor.hasBoxSelected"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

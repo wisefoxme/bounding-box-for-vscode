@@ -59,6 +59,14 @@ suite('formatProviders', () => {
 			assert.strictEqual(back.length, 1);
 			assert.strictEqual(back[0].label, '1');
 		});
+		test('serialize with yoloLabelPosition first outputs class at start', () => {
+			const boxes: Bbox[] = [{ x_min: 10, y_min: 20, width: 30, height: 40, label: 'person' }];
+			const s = yoloProvider.serialize(boxes, 100, 100, { yoloLabelPosition: 'first' });
+			assert.ok(s.startsWith('person '), 'YOLO with label first starts with class');
+			const back = yoloProvider.parse(s, 100, 100);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].label, 'person');
+		});
 		test('detect returns true for normalized floats', () => {
 			assert.strictEqual(yoloProvider.detect('0 0.5 0.5 0.1 0.1\n1 0.2 0.3 0.4 0.5'), true);
 		});

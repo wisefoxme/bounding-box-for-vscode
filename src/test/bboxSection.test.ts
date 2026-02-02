@@ -60,6 +60,18 @@ suite('bboxSection', () => {
 		getDimensions: () => ({ width: 100, height: 100 }),
 	});
 
+	test('getParent returns undefined for any element (flat tree)', () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'x.png');
+		const boxItem = new BoxTreeItem(imageUri, 0, 'Box 1');
+		const placeholder = new BboxSectionPlaceholderItem();
+		assert.strictEqual(provider.getParent(boxItem), undefined);
+		assert.strictEqual(provider.getParent(placeholder), undefined);
+	});
+
 	test('getChildren(undefined) returns placeholder when no image selected', async () => {
 		setSelectedImageUri(undefined);
 		const children = await provider.getChildren(undefined);

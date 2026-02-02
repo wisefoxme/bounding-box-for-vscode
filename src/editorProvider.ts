@@ -15,6 +15,7 @@ export interface BoundingBoxEditorProviderOptions {
 	onDimensionsReceived?: (imageUri: vscode.Uri, width: number, height: number) => void;
 	onEditorOpened?: (imageUri: vscode.Uri) => void;
 	onRequestLabelForNewBox?: (imageUri: vscode.Uri, bboxIndex: number) => Promise<string | undefined>;
+	onBboxLabelResolved?: (imageUri: vscode.Uri) => void;
 	onSelectionChanged?: (imageUri: vscode.Uri, selectedBoxIndices: number[]) => void;
 	onEditorViewStateChange?: (imageUri: vscode.Uri, active: boolean) => void;
 	/** When provided (e.g. in tests), called instead of writing to disk for bbox file. */
@@ -137,10 +138,13 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 			return;
 		}
 		try {
+			const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+			const settings = getSettings(folder ?? undefined);
 			const serialized = document.formatProvider.serialize(
 				document.boxes,
 				document.imgWidth,
 				document.imgHeight,
+				{ yoloLabelPosition: settings.yoloLabelPosition },
 			);
 			await vscode.workspace.fs.writeFile(
 				document.bboxUri,
@@ -264,8 +268,8 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 				if (msg.type === 'dirty') {
 					if (Array.isArray(msg.boxes)) {
 						document.boxes = msg.boxes;
+						this._options.onBoxesChanged?.(document.uri);
 						void this._writeBoxesToDiskAndNotify(document).then(() => {
-							this._options.onBoxesChanged?.(document.uri);
 							this._options.onBboxSaved?.(document.uri);
 						});
 					} else {
@@ -277,6 +281,11 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 					const bboxIndex = msg.bboxIndex;
 					void this._options.onRequestLabelForNewBox?.(document.uri, bboxIndex).then((label) => {
 						const resolved = label ?? `Box ${bboxIndex + 1}`;
+						if (bboxIndex >= 0 && bboxIndex < document.boxes.length) {
+							document.boxes[bboxIndex] = { ...document.boxes[bboxIndex], label: resolved };
+							this._options.onBoxesChanged?.(document.uri);
+							this._options.onBboxLabelResolved?.(document.uri);
+						}
 						webviewPanel.webview.postMessage({ type: 'renameBoxAt', bboxIndex, label: resolved });
 					});
 					return;
@@ -312,7 +321,14 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 		}
 		try {
 			document.boxes = boxes;
-			const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
+			const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+			const settings = getSettings(folder ?? undefined);
+			const serialized = document.formatProvider.serialize(
+				boxes,
+				document.imgWidth,
+				document.imgHeight,
+				{ yoloLabelPosition: settings.yoloLabelPosition },
+			);
 			const write = this._options.getWriteBboxFile?.();
 			if (write) {
 				await write(document.bboxUri, serialized);
@@ -347,7 +363,14 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 			return;
 		}
 		try {
-			const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
+			const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+			const settings = getSettings(folder ?? undefined);
+			const serialized = document.formatProvider.serialize(
+				boxes,
+				document.imgWidth,
+				document.imgHeight,
+				{ yoloLabelPosition: settings.yoloLabelPosition },
+			);
 			const write = this._options.getWriteBboxFile?.();
 			if (write) {
 				await write(destination, serialized);
@@ -388,7 +411,14 @@ export class BoundingBoxEditorProvider implements vscode.CustomEditorProvider<Bo
 			this.postMessageToEditor(document.uri, { type: 'requestSave' });
 		});
 		this._pendingSaveResolvers.delete(document.uri.toString());
-		const serialized = document.formatProvider.serialize(boxes, document.imgWidth, document.imgHeight);
+		const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+		const settings = getSettings(folder ?? undefined);
+		const serialized = document.formatProvider.serialize(
+			boxes,
+			document.imgWidth,
+			document.imgHeight,
+			{ yoloLabelPosition: settings.yoloLabelPosition },
+		);
 		const backupUri = context.destination;
 		await vscode.workspace.fs.writeFile(backupUri, new TextEncoder().encode(serialized));
 		return { id: backupUri.toString(), delete: () => vscode.workspace.fs.delete(backupUri) };
