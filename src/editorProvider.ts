@@ -162,6 +162,15 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				}
 				if (msg.type === 'save' && Array.isArray(msg.boxes)) {
 					try {
+						if (
+							document.formatProvider.id === 'yolo' &&
+							(document.imgWidth <= 0 || document.imgHeight <= 0)
+						) {
+							void vscode.window.showErrorMessage(
+								'Cannot save YOLO bounding boxes: image dimensions not yet available. Wait for the image to load.',
+							);
+							return;
+						}
 						document.boxes = msg.boxes;
 						const serialized = document.formatProvider.serialize(
 							msg.boxes,
@@ -172,8 +181,8 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 						document.bboxContent = serialized;
 						this._options.onBboxSaved?.(document.uri);
 					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${msg}`);
+						const errMsg = err instanceof Error ? err.message : String(err);
+						void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${errMsg}`);
 					}
 				}
 				if (msg.type === 'selectionChanged' && Array.isArray(msg.selectedBoxIndices)) {

@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - YOLO box labels are now shown in the Bounding Boxes section and Project tree (previously showed generic "Box 1", "Box 2").
 - Rename and save failures now show an error toast with cause and message instead of failing silently.
+- YOLO save no longer overwrites the bbox file with blank content when the image has not finished loading (dimensions were 0). Save is skipped and an error is shown until dimensions are available.
 
 ## [0.0.22] - 2026-02-01
 
