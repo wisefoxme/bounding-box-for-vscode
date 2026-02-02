@@ -195,6 +195,7 @@ export async function readMergedBboxContent(
 	workspaceFolder: vscode.WorkspaceFolder,
 	imageUri: vscode.Uri,
 	scope?: vscode.ConfigurationScope,
+	dimensions?: { width: number; height: number },
 ): Promise<ReadMergedBboxResult> {
 	const candidateUris = await getBboxCandidateUris(workspaceFolder, imageUri, scope);
 	const settings = getSettings(scope);
@@ -215,11 +216,22 @@ export async function readMergedBboxContent(
 	const provider = detected ?? getProvider(settings.bboxFormat) ?? getProvider('coco')!;
 	setProviderForImage(imageUri, provider);
 
+	const useDimensions =
+		provider.id === 'yolo' && dimensions && dimensions.width > 0 && dimensions.height > 0
+			? { w: dimensions.width, h: dimensions.height }
+			: null;
+
 	const lines: string[] = [];
 	const boxes: Bbox[] = [];
 	for (const { content } of readContents) {
 		lines.push(content.trim());
-		boxes.push(...provider.parse(content, 0, 0));
+		boxes.push(
+			...provider.parse(
+				content,
+				useDimensions?.w ?? 0,
+				useDimensions?.h ?? 0,
+			),
+		);
 	}
 
 	const primaryUri = readContents[0]?.uri ?? getBboxUriForImage(workspaceFolder, imageUri, scope);

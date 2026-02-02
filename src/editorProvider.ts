@@ -9,6 +9,7 @@ export const ADD_BOX_ON_OPEN_PREFIX = 'addBoxOnOpen_';
 
 export interface BoundingBoxEditorProviderOptions {
 	onBboxSaved?: (imageUri: vscode.Uri) => void;
+	onDimensionsReceived?: (imageUri: vscode.Uri, width: number, height: number) => void;
 	onEditorOpened?: (imageUri: vscode.Uri) => void;
 	onSelectionChanged?: (imageUri: vscode.Uri, selectedBoxIndices: number[]) => void;
 	onEditorViewStateChange?: (imageUri: vscode.Uri, active: boolean) => void;
@@ -101,7 +102,10 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 		_token: vscode.CancellationToken,
 	): Promise<void> {
 		this._panelsByUri.set(document.uri.toString(), webviewPanel);
-		webviewPanel.onDidDispose(() => this._panelsByUri.delete(document.uri.toString()));
+		webviewPanel.onDidDispose(() => {
+			this._panelsByUri.delete(document.uri.toString());
+			this._options.onDimensionsReceived?.(document.uri, 0, 0);
+		});
 		webviewPanel.onDidChangeViewState(() => {
 			this._options.onEditorViewStateChange?.(document.uri, webviewPanel.active);
 		});
@@ -139,6 +143,7 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 				if (msg.type === 'init' && msg.imgWidth !== undefined && msg.imgHeight !== undefined) {
 					document.imgWidth = msg.imgWidth;
 					document.imgHeight = msg.imgHeight;
+					this._options.onDimensionsReceived?.(document.uri, msg.imgWidth, msg.imgHeight);
 					// Re-parse if YOLO (needs dimensions)
 					if (document.formatProvider.id === 'yolo' && document.bboxContent) {
 						document.boxes = document.formatProvider.parse(
@@ -156,15 +161,20 @@ export class BoundingBoxEditorProvider implements vscode.CustomReadonlyEditorPro
 					return;
 				}
 				if (msg.type === 'save' && Array.isArray(msg.boxes)) {
-					document.boxes = msg.boxes;
-					const serialized = document.formatProvider.serialize(
-						msg.boxes,
-						document.imgWidth,
-						document.imgHeight,
-					);
-					await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
-					document.bboxContent = serialized;
-					this._options.onBboxSaved?.(document.uri);
+					try {
+						document.boxes = msg.boxes;
+						const serialized = document.formatProvider.serialize(
+							msg.boxes,
+							document.imgWidth,
+							document.imgHeight,
+						);
+						await vscode.workspace.fs.writeFile(document.bboxUri, new TextEncoder().encode(serialized));
+						document.bboxContent = serialized;
+						this._options.onBboxSaved?.(document.uri);
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						void vscode.window.showErrorMessage(`Failed to save bounding boxes: Could not write bbox file. ${msg}`);
+					}
 				}
 				if (msg.type === 'selectionChanged' && Array.isArray(msg.selectedBoxIndices)) {
 					this._options.onSelectionChanged?.(document.uri, msg.selectedBoxIndices);

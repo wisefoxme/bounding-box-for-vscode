@@ -55,6 +55,9 @@ suite('selectedImage', () => {
 
 suite('bboxSection', () => {
 	const provider = new BboxSectionTreeDataProvider();
+	const providerWithDimensions = new BboxSectionTreeDataProvider({
+		getDimensions: () => ({ width: 100, height: 100 }),
+	});
 
 	test('getChildren(undefined) returns placeholder when no image selected', async () => {
 		setSelectedImageUri(undefined);
@@ -104,6 +107,40 @@ suite('bboxSection', () => {
 			assert.strictEqual((children[1] as BoxTreeItem).label, 'label2');
 			setSelectedImageUri(undefined);
 		} finally {
+			try {
+				await vscode.workspace.fs.delete(bboxUri);
+			} catch {
+				// ignore
+			}
+		}
+	});
+
+	test('getChildren(undefined) shows YOLO box labels when getDimensions provided', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const base = `test-bbox-section-yolo-${Date.now()}`;
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Global);
+		try {
+			await vscode.workspace.fs.writeFile(
+				bboxUri,
+				new TextEncoder().encode('person 0.5 0.5 0.2 0.2\ncar 0.25 0.25 0.1 0.1\n'),
+			);
+			setSelectedImageUri(imageUri);
+			const children = await providerWithDimensions.getChildren(undefined);
+			assert.strictEqual(children.length, 2, '2 box items');
+			assert.ok(children[0] instanceof BoxTreeItem);
+			assert.ok(children[1] instanceof BoxTreeItem);
+			assert.strictEqual((children[0] as BoxTreeItem).label, 'person');
+			assert.strictEqual((children[1] as BoxTreeItem).label, 'car');
+			setSelectedImageUri(undefined);
+		} finally {
+			await config.update('bboxFormat', undefined, vscode.ConfigurationTarget.Global);
 			try {
 				await vscode.workspace.fs.delete(bboxUri);
 			} catch {

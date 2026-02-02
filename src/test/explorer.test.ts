@@ -128,4 +128,40 @@ suite('explorer', () => {
 			}
 		}
 	});
+
+	test('getChildren(BoundingBoxesGroupItem) shows YOLO box labels when getDimensions provided', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const base = `test-explorer-yolo-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Global);
+		const providerWithDimensions = new ProjectTreeDataProvider({
+			getDimensions: () => ({ width: 100, height: 100 }),
+		});
+		try {
+			await vscode.workspace.fs.writeFile(
+				bboxUri,
+				new TextEncoder().encode('person 0.5 0.5 0.2 0.2\ncar 0.25 0.25 0.1 0.1\n'),
+			);
+			const groupItem = new BoundingBoxesGroupItem(imageUri, bboxUri, folder);
+			const children = await providerWithDimensions.getChildren(groupItem);
+			assert.strictEqual(children.length, 2);
+			assert.ok(children[0] instanceof BoxTreeItem);
+			assert.ok(children[1] instanceof BoxTreeItem);
+			assert.strictEqual((children[0] as BoxTreeItem).label, 'person');
+			assert.strictEqual((children[1] as BoxTreeItem).label, 'car');
+		} finally {
+			await config.update('bboxFormat', undefined, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.fs.delete(bboxUri);
+			} catch {
+				// ignore
+			}
+		}
+	});
 });

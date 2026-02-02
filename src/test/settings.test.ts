@@ -9,6 +9,7 @@ import {
 	getBboxUriForImage,
 	getBboxCandidateUris,
 	getDefaultBoundingBoxes,
+	readMergedBboxContent,
 } from '../settings';
 
 suite('settings', () => {
@@ -250,6 +251,44 @@ suite('settings', () => {
 			assert.strictEqual(result.length, 0);
 		} finally {
 			await config.update('defaultBoundingBoxes', undefined, vscode.ConfigurationTarget.Global);
+		}
+	});
+
+	test('readMergedBboxContent with dimensions parses YOLO and returns boxes with labels', async () => {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+		if (!folder) {
+			return;
+		}
+		const base = `test-read-merged-yolo-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		try {
+			await vscode.workspace.fs.writeFile(
+				bboxUri,
+				new TextEncoder().encode('person 0.5 0.5 0.2 0.2\ncar 0.25 0.25 0.1 0.1\n'),
+			);
+			const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+			await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Global);
+			try {
+				const withoutDims = await readMergedBboxContent(folder, imageUri);
+				assert.strictEqual(withoutDims.boxes.length, 0, 'YOLO without dimensions returns no boxes');
+
+				const withDims = await readMergedBboxContent(folder, imageUri, undefined, {
+					width: 100,
+					height: 100,
+				});
+				assert.strictEqual(withDims.boxes.length, 2);
+				assert.strictEqual(withDims.boxes[0].label, 'person');
+				assert.strictEqual(withDims.boxes[1].label, 'car');
+			} finally {
+				await config.update('bboxFormat', undefined, vscode.ConfigurationTarget.Global);
+			}
+		} finally {
+			try {
+				await vscode.workspace.fs.delete(bboxUri);
+			} catch {
+				// ignore
+			}
 		}
 	});
 });

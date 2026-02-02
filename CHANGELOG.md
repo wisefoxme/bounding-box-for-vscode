@@ -4,6 +4,13 @@ All notable changes to the "bounding-box-editor" extension will be documented in
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- YOLO box labels are now shown in the Bounding Boxes section and Project tree (previously showed generic "Box 1", "Box 2").
+- Rename and save failures now show an error toast with cause and message instead of failing silently.
+
 ## [0.0.22] - 2026-02-01
 
 ### Added

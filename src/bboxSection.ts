@@ -14,9 +14,16 @@ export class BboxSectionPlaceholderItem extends vscode.TreeItem {
 
 export type BboxSectionTreeItem = BoxTreeItem | BboxSectionPlaceholderItem;
 
+export type GetDimensions = (uri: vscode.Uri) => { width: number; height: number } | undefined;
+
 export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<BboxSectionTreeItem> {
+	private readonly _getDimensions?: GetDimensions;
 	private _onDidChangeTreeData = new vscode.EventEmitter<BboxSectionTreeItem | undefined | void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+	constructor(options?: { getDimensions?: GetDimensions }) {
+		this._getDimensions = options?.getDimensions;
+	}
 
 	refresh(): void {
 		this._onDidChangeTreeData.fire();
@@ -46,15 +53,20 @@ export class BboxSectionTreeDataProvider implements vscode.TreeDataProvider<Bbox
 			return [new BboxSectionPlaceholderItem('Open the image and draw on the canvas to add boxes')];
 		}
 
-		const merged = await readMergedBboxContent(folder, imageUri);
+		const merged = await readMergedBboxContent(folder, imageUri, undefined, this._getDimensions?.(imageUri));
 		const boxes = merged.boxes;
 		const selectedIndices = getSelectedBoxIndices();
 		const settings = getSettings();
 
 		if (settings.bboxFormat === 'yolo') {
-			return boxes.map((_, i) =>
-				new BoxTreeItem(imageUri, i, `Box ${i + 1}`, { selected: selectedIndices.includes(i) }),
-			);
+			return boxes.map((b, i) => {
+				const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;
+				const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;
+				return new BoxTreeItem(imageUri, i, label, {
+					description,
+					selected: selectedIndices.includes(i),
+				});
+			});
 		}
 		return boxes.map((b, i) => {
 			const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;

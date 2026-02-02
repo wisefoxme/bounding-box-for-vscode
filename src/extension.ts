@@ -22,7 +22,11 @@ const BBOX_SECTION_BOX_SELECTED_CONTEXT = 'boundingBoxEditor.bboxSectionBoxSelec
 const BBOX_SECTION_MULTIPLE_BOXES_SELECTED_CONTEXT = 'boundingBoxEditor.bboxSectionMultipleBoxesSelected';
 
 export function activate(context: vscode.ExtensionContext) {
-	const bboxSectionProvider = new BboxSectionTreeDataProvider();
+	const dimensionsByImageUri = new Map<string, { width: number; height: number }>();
+	const getDimensions = (uri: vscode.Uri): { width: number; height: number } | undefined =>
+		dimensionsByImageUri.get(uri.toString());
+
+	const bboxSectionProvider = new BboxSectionTreeDataProvider({ getDimensions });
 	const editorSelectionByUri = new Map<string, number[]>();
 
 	const { provider: projectProvider, treeView: projectTreeView } = registerExplorer(
@@ -32,6 +36,7 @@ export function activate(context: vscode.ExtensionContext) {
 			bboxSectionProvider.refresh();
 		},
 		() => bboxSectionProvider.refresh(),
+		getDimensions,
 	);
 
 	const refreshTrees = (): void => {
@@ -57,6 +62,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const editorProvider = new BoundingBoxEditorProvider(context, {
 		onBboxSaved: refreshTrees,
+		onDimensionsReceived: (imageUri: vscode.Uri, width: number, height: number) => {
+			if (width > 0 && height > 0) {
+				dimensionsByImageUri.set(imageUri.toString(), { width, height });
+			} else {
+				dimensionsByImageUri.delete(imageUri.toString());
+			}
+		},
 		onEditorOpened: (imageUri: vscode.Uri) => {
 			setSelectedImageUri(imageUri);
 			bboxSectionProvider.refresh();
@@ -198,56 +210,76 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	async function doRenameBox(imageUri: vscode.Uri, bboxIndex: number): Promise<void> {
-		const folder = vscode.workspace.getWorkspaceFolder(imageUri);
-		if (!folder) {return;}
-		const bboxUri = getBboxUriForImage(folder, imageUri);
-		const settings = getSettings();
-		const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
-		if (!provider) {return;}
-		let currentLabel = `Box ${bboxIndex + 1}`;
-		if (provider.id !== 'yolo') {
-			try {
-				const content = new TextDecoder().decode(await vscode.workspace.fs.readFile(bboxUri));
-				const boxes = provider.parse(content, 0, 0);
-				if (bboxIndex >= 0 && bboxIndex < boxes.length) {
-					currentLabel = boxes[bboxIndex].label ?? currentLabel;
-				}
-			} catch {
-				// use default label
-			}
-		} else if (editorProvider.hasEditorOpen(imageUri)) {
-			// YOLO: get current label from webview would require another message; use default
-		}
-		const newLabel = await vscode.window.showInputBox({
-			title: 'Rename bounding box',
-			value: currentLabel,
-			prompt: 'Enter new label for the box',
-		});
-		if (newLabel === undefined) {return;}
-		if (provider.id === 'yolo' && editorProvider.hasEditorOpen(imageUri)) {
-			editorProvider.postMessageToEditor(imageUri, { type: 'renameBoxAt', bboxIndex, label: newLabel });
-			refreshTrees();
-			return;
-		}
-		if (provider.id === 'yolo') {
-			void vscode.window.showInformationMessage(
-				'Open the image in the Bounding Box Editor to rename boxes (YOLO format).',
-			);
-			return;
-		}
-		let content: string;
 		try {
-			content = new TextDecoder().decode(await vscode.workspace.fs.readFile(bboxUri));
-		} catch {
-			return;
+			const folder = vscode.workspace.getWorkspaceFolder(imageUri);
+			if (!folder) {
+				void vscode.window.showErrorMessage('Failed to rename bounding box: Image is not in a workspace folder.');
+				return;
+			}
+			const bboxUri = getBboxUriForImage(folder, imageUri);
+			const settings = getSettings();
+			const provider = getProviderForImage(imageUri) ?? getProvider(settings.bboxFormat);
+			if (!provider) {
+				void vscode.window.showErrorMessage('Failed to rename bounding box: No format provider available.');
+				return;
+			}
+			let currentLabel = `Box ${bboxIndex + 1}`;
+			if (provider.id !== 'yolo') {
+				try {
+					const content = new TextDecoder().decode(await vscode.workspace.fs.readFile(bboxUri));
+					const boxes = provider.parse(content, 0, 0);
+					if (bboxIndex >= 0 && bboxIndex < boxes.length) {
+						currentLabel = boxes[bboxIndex].label ?? currentLabel;
+					}
+				} catch {
+					// use default label
+				}
+			}
+			const newLabel = await vscode.window.showInputBox({
+				title: 'Rename bounding box',
+				value: currentLabel,
+				prompt: 'Enter new label for the box',
+			});
+			if (newLabel === undefined) {return;}
+			if (provider.id === 'yolo' && editorProvider.hasEditorOpen(imageUri)) {
+				editorProvider.postMessageToEditor(imageUri, { type: 'renameBoxAt', bboxIndex, label: newLabel });
+				refreshTrees();
+				return;
+			}
+			if (provider.id === 'yolo') {
+				void vscode.window.showInformationMessage(
+					'Open the image in the Bounding Box Editor to rename boxes (YOLO format).',
+				);
+				return;
+			}
+			let content: string;
+			try {
+				content = new TextDecoder().decode(await vscode.workspace.fs.readFile(bboxUri));
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				void vscode.window.showErrorMessage(`Failed to rename bounding box: Could not read bbox file. ${msg}`);
+				return;
+			}
+			const boxes = provider.parse(content, 0, 0);
+			if (bboxIndex < 0 || bboxIndex >= boxes.length) {
+				void vscode.window.showErrorMessage(`Failed to rename bounding box: Invalid box index (${bboxIndex}).`);
+				return;
+			}
+			boxes[bboxIndex] = { ...boxes[bboxIndex], label: newLabel };
+			const serialized = provider.serialize(boxes, 0, 0);
+			try {
+				await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(serialized));
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				void vscode.window.showErrorMessage(`Failed to rename bounding box: Could not write bbox file. ${msg}`);
+				return;
+			}
+			refreshTrees();
+			editorProvider.postMessageToEditor(imageUri, { type: 'boxes', boxes });
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			void vscode.window.showErrorMessage(`Failed to rename bounding box: ${msg}`);
 		}
-		const boxes = provider.parse(content, 0, 0);
-		if (bboxIndex < 0 || bboxIndex >= boxes.length) {return;}
-		boxes[bboxIndex] = { ...boxes[bboxIndex], label: newLabel };
-		const serialized = provider.serialize(boxes, 0, 0);
-		await vscode.workspace.fs.writeFile(bboxUri, new TextEncoder().encode(serialized));
-		refreshTrees();
-		editorProvider.postMessageToEditor(imageUri, { type: 'boxes', boxes });
 	}
 
 	context.subscriptions.push(
