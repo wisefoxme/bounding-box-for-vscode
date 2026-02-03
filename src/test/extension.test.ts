@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { BoxTreeItem } from '../explorer';
+import { BoxTreeItem, ProjectTreeItem, BoundingBoxesGroupItem } from '../explorer';
+import { createOnBboxSaved } from '../extension';
 
 suite('Extension Test Suite', () => {
 	test('Extension activates', async () => {
@@ -13,6 +14,19 @@ suite('Extension Test Suite', () => {
 		}
 		await ext.activate();
 		assert.strictEqual(ext.isActive, true);
+	});
+
+	test('setBboxFormat command can be invoked without throwing', async function () {
+		this.timeout(3000);
+		// When a workspace folder is open, the command shows a QuickPick and does not resolve until the user picks.
+		// Race with a short timeout: if the command completes (no workspace) or we timeout (picker open), it was invocable.
+		const result = await Promise.race([
+			vscode.commands.executeCommand('bounding-box-editor.setBboxFormat'),
+			new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 1500)),
+		]);
+		if (result === 'timeout') {
+			return; // Command opened UI and is waiting; consider it invocable.
+		}
 	});
 
 	test('revealBboxFile can be invoked with BoxTreeItem argument without throwing', async () => {
@@ -32,5 +46,67 @@ suite('Extension Test Suite', () => {
 			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.revealBboxFile', item)),
 			'revealBboxFile should not throw when invoked with BoxTreeItem',
 		);
+	});
+
+	test('removeAllBoxes can be invoked with no arguments without throwing', async () => {
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes')),
+			'removeAllBoxes should not throw when invoked with no selection',
+		);
+	});
+
+	test('removeAllBoxes can be invoked with BoundingBoxesGroupItem argument without throwing', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const imageUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all.png');
+		const bboxUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all.txt');
+		const item = new BoundingBoxesGroupItem(imageUri, bboxUri, folder);
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes', item)),
+			'removeAllBoxes should not throw when invoked with BoundingBoxesGroupItem',
+		);
+	});
+
+	test('removeAllBoxes can be invoked with ProjectTreeItem (imageWithBbox) argument without throwing', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const imageUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all-image.png');
+		const bboxUri = vscode.Uri.joinPath(folder.uri, 'test-remove-all-image.txt');
+		const item = new ProjectTreeItem(imageUri, bboxUri, folder);
+		await assert.doesNotReject(
+			Promise.resolve(vscode.commands.executeCommand('bounding-box-editor.removeAllBoxes', item)),
+			'removeAllBoxes should not throw when invoked with ProjectTreeItem',
+		);
+	});
+
+	test('createOnBboxSaved refreshes project tree for image and bbox section', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'test.png');
+		let refreshForImageCalled = false;
+		let refreshForImageUri: vscode.Uri | undefined;
+		let bboxRefreshCount = 0;
+		const mockProjectProvider = {
+			refreshForImage: (uri: vscode.Uri) => {
+				refreshForImageCalled = true;
+				refreshForImageUri = uri;
+			},
+		};
+		const mockBboxSection = { refresh: () => { bboxRefreshCount++; } };
+		const onBboxSaved = createOnBboxSaved(mockProjectProvider, mockBboxSection);
+		onBboxSaved(imageUri);
+		assert.strictEqual(refreshForImageCalled, true, 'project provider refreshForImage should be called');
+		assert.strictEqual(refreshForImageUri?.toString(), imageUri.toString(), 'refreshForImage should be called with correct imageUri');
+		await new Promise((r) => setTimeout(r, 0));
+		await new Promise((r) => setTimeout(r, 60));
+		assert.strictEqual(bboxRefreshCount, 2, 'bbox section refresh should be called twice (deferred + 50ms)');
 	});
 });

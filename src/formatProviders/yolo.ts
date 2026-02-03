@@ -12,8 +12,8 @@ export const yoloProvider: BboxFormatProvider = {
 	parse(content: string, imgWidth = 0, imgHeight = 0): Bbox[] {
 		return parseYolo(content, imgWidth, imgHeight);
 	},
-	serialize(boxes: Bbox[], imgWidth = 0, imgHeight = 0): string {
-		return serializeYolo(boxes, imgWidth, imgHeight);
+	serialize(boxes: Bbox[], imgWidth = 0, imgHeight = 0, options?: { yoloLabelPosition?: 'first' | 'last' }): string {
+		return serializeYolo(boxes, imgWidth, imgHeight, options?.yoloLabelPosition ?? 'last');
 	},
 	detect(content: string): boolean {
 		const lines = content.trim().split(/\r?\n/).filter(Boolean);
@@ -21,7 +21,10 @@ export const yoloProvider: BboxFormatProvider = {
 		let matching = 0;
 		for (const line of lines) {
 			const parts = line.trim().split(/\s+/);
-			if (parts.length >= 5 && parts.slice(1, 5).every(isNormalizedFloat)) {
+			if (
+				parts.length >= 5 &&
+				(parts.slice(1, 5).every(isNormalizedFloat) || parts.slice(0, 4).every(isNormalizedFloat))
+			) {
 				matching++;
 			}
 		}

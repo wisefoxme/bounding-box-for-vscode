@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import {
+	decimalPlacesForImage,
 	parseCoco,
 	serializeCoco,
 	parseYolo,
@@ -12,6 +13,18 @@ import {
 } from '../bbox';
 
 suite('bbox', () => {
+	suite('decimalPlacesForImage', () => {
+		test('returns digit count of max dimension, capped at 8', () => {
+			assert.strictEqual(decimalPlacesForImage(1920, 1080), 4);
+			assert.strictEqual(decimalPlacesForImage(100, 50), 3);
+			assert.strictEqual(decimalPlacesForImage(1, 1), 1);
+			assert.strictEqual(decimalPlacesForImage(999999999, 1), 8);
+		});
+		test('returns fallback when dimensions are zero', () => {
+			assert.strictEqual(decimalPlacesForImage(0, 0), 2);
+		});
+	});
+
 	suite('COCO', () => {
 		test('parseCoco parses lines', () => {
 			const boxes = parseCoco('10 20 30 40\n50 60 70 80');
@@ -48,11 +61,20 @@ suite('bbox', () => {
 				{ x_min: 10, y_min: 20, width: 30, height: 40 },
 				{ x_min: 50, y_min: 60, width: 70, height: 80, label: 'cat' },
 			];
-			const s = serializeCoco(boxes);
+			const s = serializeCoco(boxes, 0, 0);
 			const back = parseCoco(s);
 			assert.strictEqual(back.length, 2);
 			assert.strictEqual(back[0].x_min, 10);
 			assert.strictEqual(back[1].label, 'cat');
+		});
+		test('serializeCoco uses decimal places from image dimensions', () => {
+			const boxes: Bbox[] = [{ x_min: 10.1234, y_min: 20, width: 30, height: 40 }];
+			const s = serializeCoco(boxes, 100, 100);
+			// 100 -> 3 digits -> 3 decimal places
+			assert.match(s, /\d+\.\d{3}\s/);
+			const back = parseCoco(s);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].x_min, 10.123);
 		});
 	});
 
@@ -80,12 +102,47 @@ suite('bbox', () => {
 				{ x_min: 10, y_min: 20, width: 30, height: 40, label: '1' },
 			];
 			const s = serializeYolo(boxes, 100, 100);
+			assert.ok(s.endsWith(' 1'), 'YOLO serializes with label last');
 			const back = parseYolo(s, 100, 100);
 			assert.strictEqual(back.length, 1);
 			assert.strictEqual(back[0].x_min, 10);
 			assert.strictEqual(back[0].y_min, 20);
 			assert.strictEqual(back[0].width, 30);
 			assert.strictEqual(back[0].height, 40);
+			assert.strictEqual(back[0].label, '1');
+		});
+		test('serializeYolo with label first outputs class at start and round-trips', () => {
+			const boxes: Bbox[] = [
+				{ x_min: 10, y_min: 20, width: 30, height: 40, label: '1' },
+			];
+			const s = serializeYolo(boxes, 100, 100, 'first');
+			assert.ok(s.startsWith('1 '), 'YOLO with label first starts with class');
+			const back = parseYolo(s, 100, 100);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].x_min, 10);
+			assert.strictEqual(back[0].y_min, 20);
+			assert.strictEqual(back[0].width, 30);
+			assert.strictEqual(back[0].height, 40);
+			assert.strictEqual(back[0].label, '1');
+		});
+		test('parseYolo preserves multi-word label when label is last', () => {
+			const boxes = parseYolo('0.25 0.35 0.3 0.4 Drop Tower', 100, 100);
+			assert.strictEqual(boxes.length, 1);
+			assert.strictEqual(boxes[0].label, 'Drop Tower', 'multi-word label preserved');
+		});
+		test('parseYolo preserves multi-word label when class is first', () => {
+			const boxes = parseYolo('Drop Tower 0.25 0.35 0.3 0.4', 100, 100);
+			assert.strictEqual(boxes.length, 1);
+			assert.strictEqual(boxes[0].label, 'Drop Tower', 'multi-word label preserved');
+		});
+		test('serializeYolo round-trip with multi-word label', () => {
+			const boxes: Bbox[] = [
+				{ x_min: 10, y_min: 20, width: 30, height: 40, label: 'Drop Tower' },
+			];
+			const s = serializeYolo(boxes, 100, 100);
+			const back = parseYolo(s, 100, 100);
+			assert.strictEqual(back.length, 1);
+			assert.strictEqual(back[0].label, 'Drop Tower', 'multi-word label round-trips');
 		});
 	});
 
@@ -112,7 +169,7 @@ suite('bbox', () => {
 			const boxes: Bbox[] = [
 				{ x_min: 10, y_min: 20, width: 30, height: 40 },
 			];
-			const s = serializePascalVoc(boxes);
+			const s = serializePascalVoc(boxes, 0, 0);
 			const back = parsePascalVoc(s);
 			assert.strictEqual(back.length, 1);
 			assert.strictEqual(back[0].x_min, 10);
@@ -126,7 +183,8 @@ suite('bbox', () => {
 			assert.strictEqual(boxes.length, 1);
 			assert.strictEqual(boxes[0].x_min, 1);
 			const s = serializeBbox(boxes, 'coco', 0, 0);
-			assert.ok(s.includes('1 2 3 4'));
+			// Fallback 2 decimals when dimensions 0
+			assert.ok(/1\.00\s+2\.00\s+3\.00\s+4\.00/.test(s));
 		});
 		test('yolo format uses dimensions', () => {
 			const boxes = parseBbox('0 0.5 0.5 0.2 0.2', 'yolo', 100, 100);
@@ -140,7 +198,8 @@ suite('bbox', () => {
 			assert.strictEqual(boxes.length, 1);
 			assert.strictEqual(boxes[0].width, 30);
 			const s = serializeBbox(boxes, 'pascal_voc', 0, 0);
-			assert.ok(s.includes('10 20 40 60'));
+			// Fallback 2 decimals when dimensions 0
+			assert.ok(/10\.00\s+20\.00\s+40\.00\s+60\.00/.test(s));
 		});
 		test('unknown format defaults to coco', () => {
 			const boxes = parseBbox('5 10 15 20', 'coco', 0, 0);

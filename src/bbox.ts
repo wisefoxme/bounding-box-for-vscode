@@ -1,5 +1,22 @@
 import type { BboxFormat } from './settings';
 
+const DECIMAL_PLACES_FALLBACK = 2;
+const DECIMAL_PLACES_CAP = 8;
+
+/** Decimal places for coordinates = digit count of max(width, height), capped at 8. Zero dimensions use fallback. */
+export function decimalPlacesForImage(imgWidth: number, imgHeight: number): number {
+	const maxDim = Math.max(0, imgWidth, imgHeight);
+	if (maxDim === 0) {
+		return DECIMAL_PLACES_FALLBACK;
+	}
+	const digits = String(Math.floor(maxDim)).length;
+	return Math.min(DECIMAL_PLACES_CAP, digits);
+}
+
+export function formatCoord(value: number, decimals: number): string {
+	return value.toFixed(decimals);
+}
+
 export interface Bbox {
 	x_min: number;
 	y_min: number;
@@ -34,24 +51,67 @@ export function parseCoco(content: string): Bbox[] {
 	return boxes;
 }
 
-export function serializeCoco(boxes: Bbox[]): string {
+export function serializeCoco(boxes: Bbox[], imgWidth = 0, imgHeight = 0): string {
+	const decimals = decimalPlacesForImage(imgWidth, imgHeight);
 	return boxes
-		.map((b) => (b.label !== undefined && b.label !== null ? `${b.x_min} ${b.y_min} ${b.width} ${b.height} ${b.label}` : `${b.x_min} ${b.y_min} ${b.width} ${b.height}`))
-		.join('\n') + (boxes.length ? '\n' : '');
+		.map((b) => {
+			const coords = `${formatCoord(b.x_min, decimals)} ${formatCoord(b.y_min, decimals)} ${formatCoord(b.width, decimals)} ${formatCoord(b.height, decimals)}`;
+			return b.label !== undefined && b.label !== null ? `${coords} ${b.label}` : coords;
+		})
+		.join('\n');
 }
 
-/** YOLO: class x_center y_center width height (normalized 0-1). */
+/** YOLO: accepts "class x_center y_center width height" (class first) and "x_center y_center width height class" (label last). Normalized 0-1. */
 export function parseYolo(content: string, imgWidth: number, imgHeight: number): Bbox[] {
 	const lines = content.trim().split(/\r?\n/).filter(Boolean);
 	const boxes: Bbox[] = [];
+	const normalized = (n: number) => Number.isFinite(n) && n >= 0 && n <= 1;
 	for (const line of lines) {
 		const parts = line.trim().split(/\s+/);
 		if (parts.length >= 5 && imgWidth > 0 && imgHeight > 0) {
-			const cls = parts[0];
-			const x_center = Number(parts[1]) * imgWidth;
-			const y_center = Number(parts[2]) * imgHeight;
-			const w = Number(parts[3]) * imgWidth;
-			const h = Number(parts[4]) * imgHeight;
+			const p0 = Number(parts[0]);
+			const p1 = Number(parts[1]);
+			const p2 = Number(parts[2]);
+			const p3 = Number(parts[3]);
+			const p4 = Number(parts[4]);
+			let cls: string;
+			let x_center: number;
+			let y_center: number;
+			let w: number;
+			let h: number;
+			const coordsFirstNormalized = normalized(p0) && normalized(p1) && normalized(p2) && normalized(p3);
+			const classFirstNormalized = normalized(p1) && normalized(p2) && normalized(p3) && normalized(p4);
+			const looksLikeClassFirst =
+				classFirstNormalized && (Number.isInteger(p0) || !normalized(p0));
+			if (looksLikeClassFirst) {
+				cls = parts[0];
+				x_center = p1 * imgWidth;
+				y_center = p2 * imgHeight;
+				w = p3 * imgWidth;
+				h = p4 * imgHeight;
+			} else if (coordsFirstNormalized) {
+				cls = parts.slice(4).join(' ');
+				x_center = p0 * imgWidth;
+				y_center = p1 * imgHeight;
+				w = p2 * imgWidth;
+				h = p3 * imgHeight;
+			} else {
+				const last4Normalized =
+					parts.length >= 5 &&
+					normalized(Number(parts[parts.length - 4])) &&
+					normalized(Number(parts[parts.length - 3])) &&
+					normalized(Number(parts[parts.length - 2])) &&
+					normalized(Number(parts[parts.length - 1]));
+				if (last4Normalized) {
+					cls = parts.slice(0, parts.length - 4).join(' ');
+					x_center = Number(parts[parts.length - 4]) * imgWidth;
+					y_center = Number(parts[parts.length - 3]) * imgHeight;
+					w = Number(parts[parts.length - 2]) * imgWidth;
+					h = Number(parts[parts.length - 1]) * imgHeight;
+				} else {
+					continue;
+				}
+			}
 			if (Number.isFinite(x_center) && Number.isFinite(y_center) && Number.isFinite(w) && Number.isFinite(h)) {
 				boxes.push({
 					x_min: x_center - w / 2,
@@ -66,10 +126,17 @@ export function parseYolo(content: string, imgWidth: number, imgHeight: number):
 	return boxes;
 }
 
-export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number): string {
+/** YOLO: normalized 0-1. labelPosition 'last' = x_center y_center width height class; 'first' = class x_center y_center width height. */
+export function serializeYolo(
+	boxes: Bbox[],
+	imgWidth: number,
+	imgHeight: number,
+	labelPosition: 'first' | 'last' = 'last',
+): string {
 	if (imgWidth <= 0 || imgHeight <= 0) {
 		return '';
 	}
+	const decimals = decimalPlacesForImage(imgWidth, imgHeight);
 	return boxes
 		.map((b) => {
 			const x_center = (b.x_min + b.width / 2) / imgWidth;
@@ -77,9 +144,10 @@ export function serializeYolo(boxes: Bbox[], imgWidth: number, imgHeight: number
 			const w = b.width / imgWidth;
 			const h = b.height / imgHeight;
 			const cls = b.label ?? '0';
-			return `${cls} ${x_center} ${y_center} ${w} ${h}`;
+			const coords = `${formatCoord(x_center, decimals)} ${formatCoord(y_center, decimals)} ${formatCoord(w, decimals)} ${formatCoord(h, decimals)}`;
+			return labelPosition === 'first' ? `${cls} ${coords}` : `${coords} ${cls}`;
 		})
-		.join('\n') + (boxes.length ? '\n' : '');
+		.join('\n');
 }
 
 /** Pascal VOC: x_min y_min x_max y_max [label]. */
@@ -107,14 +175,16 @@ export function parsePascalVoc(content: string): Bbox[] {
 	return boxes;
 }
 
-export function serializePascalVoc(boxes: Bbox[]): string {
+export function serializePascalVoc(boxes: Bbox[], imgWidth = 0, imgHeight = 0): string {
+	const decimals = decimalPlacesForImage(imgWidth, imgHeight);
 	return boxes
 		.map((b) => {
 			const x_max = b.x_min + b.width;
 			const y_max = b.y_min + b.height;
-			return (b.label !== undefined && b.label !== null ? `${b.x_min} ${b.y_min} ${x_max} ${y_max} ${b.label}` : `${b.x_min} ${b.y_min} ${x_max} ${y_max}`);
+			const coords = `${formatCoord(b.x_min, decimals)} ${formatCoord(b.y_min, decimals)} ${formatCoord(x_max, decimals)} ${formatCoord(y_max, decimals)}`;
+			return b.label !== undefined && b.label !== null ? `${coords} ${b.label}` : coords;
 		})
-		.join('\n') + (boxes.length ? '\n' : '');
+		.join('\n');
 }
 
 export function parseBbox(content: string, format: BboxFormat, imgWidth: number, imgHeight: number): Bbox[] {
@@ -133,12 +203,12 @@ export function parseBbox(content: string, format: BboxFormat, imgWidth: number,
 export function serializeBbox(boxes: Bbox[], format: BboxFormat, imgWidth: number, imgHeight: number): string {
 	switch (format) {
 		case 'coco':
-			return serializeCoco(boxes);
+			return serializeCoco(boxes, imgWidth, imgHeight);
 		case 'yolo':
 			return serializeYolo(boxes, imgWidth, imgHeight);
 		case 'pascal_voc':
-			return serializePascalVoc(boxes);
+			return serializePascalVoc(boxes, imgWidth, imgHeight);
 		default:
-			return serializeCoco(boxes);
+			return serializeCoco(boxes, imgWidth, imgHeight);
 	}
 }

@@ -68,10 +68,13 @@ function parseDefaultBoundingBoxes(raw: unknown): Bbox[] {
 
 export type BboxFormat = 'coco' | 'yolo' | 'pascal_voc';
 
+export type YoloLabelPosition = 'first' | 'last';
+
 export interface BoundingBoxEditorSettings {
 	imageDirectory: string;
 	bboxDirectory: string;
 	bboxFormat: BboxFormat;
+	yoloLabelPosition: YoloLabelPosition;
 	allowedBoundingBoxFileExtensions: string[];
 }
 
@@ -80,6 +83,7 @@ export function getSettings(scope?: vscode.ConfigurationScope): BoundingBoxEdito
 	const imageDirectory = (config.get<string>('imageDirectory') ?? '.').trim() || '.';
 	const bboxDirectory = (config.get<string>('bboxDirectory') ?? '').trim();
 	const bboxFormat = (config.get<BboxFormat>('bboxFormat') ?? 'coco');
+	const yoloLabelPosition = (config.get<YoloLabelPosition>('yoloLabelPosition') ?? 'last');
 	const allowedBoundingBoxFileExtensions = parseAllowedBoundingBoxFileExtensions(
 		config.get<unknown>('allowedBoundingBoxFileExtensions'),
 	);
@@ -87,8 +91,18 @@ export function getSettings(scope?: vscode.ConfigurationScope): BoundingBoxEdito
 		imageDirectory,
 		bboxDirectory: bboxDirectory || imageDirectory,
 		bboxFormat,
+		yoloLabelPosition,
 		allowedBoundingBoxFileExtensions,
 	};
+}
+
+/** Set bbox format for the given scope (e.g. workspace folder). Writes to workspace settings. */
+export async function setBboxFormat(
+	scope: vscode.ConfigurationScope | undefined,
+	format: BboxFormat,
+): Promise<void> {
+	const config = vscode.workspace.getConfiguration(SECTION, scope);
+	await config.update('bboxFormat', format, vscode.ConfigurationTarget.Workspace);
 }
 
 export function getImageDirUri(workspaceFolder: vscode.WorkspaceFolder, scope?: vscode.ConfigurationScope): vscode.Uri {
@@ -118,21 +132,49 @@ export function getAllowedBoundingBoxFileExtensions(scope?: vscode.Configuration
 	);
 }
 
-export function getBboxUriForImage(
+function getBboxUriForImageWithExtension(
 	workspaceFolder: vscode.WorkspaceFolder,
 	imageUri: vscode.Uri,
+	ext: string,
 	scope?: vscode.ConfigurationScope,
 ): vscode.Uri {
 	const bboxDirSetting = (vscode.workspace.getConfiguration(SECTION, scope).get<string>('bboxDirectory') ?? '').trim();
 	const base = imageUri.path.replace(/\.[^/.]+$/, '');
 	const baseName = base.split('/').pop() ?? '';
-	const ext = getBboxExtension(scope);
 	if (!bboxDirSetting) {
 		const imageDir = path.dirname(imageUri.fsPath);
 		return vscode.Uri.joinPath(vscode.Uri.file(imageDir), baseName + ext);
 	}
 	const bboxDir = getBboxDirUri(workspaceFolder, scope);
 	return vscode.Uri.joinPath(bboxDir, baseName + ext);
+}
+
+export function getBboxUriForImage(
+	workspaceFolder: vscode.WorkspaceFolder,
+	imageUri: vscode.Uri,
+	scope?: vscode.ConfigurationScope,
+): vscode.Uri {
+	return getBboxUriForImageWithExtension(workspaceFolder, imageUri, getBboxExtension(scope), scope);
+}
+
+/** First existing bbox file for the image (by allowed extension order), or the default path if none exist. */
+export async function getPrimaryBboxUriForImage(
+	workspaceFolder: vscode.WorkspaceFolder,
+	imageUri: vscode.Uri,
+	scope?: vscode.ConfigurationScope,
+): Promise<vscode.Uri> {
+	const allowed = getAllowedBoundingBoxFileExtensions(scope);
+	const extList = allowed.length === 0 || allowed.includes('*') ? ['.txt'] : allowed;
+	for (const ext of extList) {
+		const uri = getBboxUriForImageWithExtension(workspaceFolder, imageUri, ext, scope);
+		try {
+			await vscode.workspace.fs.stat(uri);
+			return uri;
+		} catch {
+			// continue to next extension
+		}
+	}
+	return getBboxUriForImage(workspaceFolder, imageUri, scope);
 }
 
 function getBboxDirOrImageDirUri(
@@ -195,6 +237,7 @@ export async function readMergedBboxContent(
 	workspaceFolder: vscode.WorkspaceFolder,
 	imageUri: vscode.Uri,
 	scope?: vscode.ConfigurationScope,
+	dimensions?: { width: number; height: number },
 ): Promise<ReadMergedBboxResult> {
 	const candidateUris = await getBboxCandidateUris(workspaceFolder, imageUri, scope);
 	const settings = getSettings(scope);
@@ -212,14 +255,31 @@ export async function readMergedBboxContent(
 
 	const firstContent = readContents[0]?.content ?? null;
 	const detected = firstContent ? detect(firstContent) : null;
-	const provider = detected ?? getProvider(settings.bboxFormat) ?? getProvider('coco')!;
+	// If a non-default format is explicitly configured, use that. Otherwise prefer detection, then configured format.
+	const isDefaultFormat = settings.bboxFormat === 'coco';
+	const provider =
+		(!isDefaultFormat ? getProvider(settings.bboxFormat) : null) ||
+		detected ||
+		getProvider(settings.bboxFormat) ||
+		getProvider('coco')!;
 	setProviderForImage(imageUri, provider);
+
+	const useDimensions =
+		provider.id === 'yolo' && dimensions && dimensions.width > 0 && dimensions.height > 0
+			? { w: dimensions.width, h: dimensions.height }
+			: null;
 
 	const lines: string[] = [];
 	const boxes: Bbox[] = [];
 	for (const { content } of readContents) {
 		lines.push(content.trim());
-		boxes.push(...provider.parse(content, 0, 0));
+		boxes.push(
+			...provider.parse(
+				content,
+				useDimensions?.w ?? 0,
+				useDimensions?.h ?? 0,
+			),
+		);
 	}
 
 	const primaryUri = readContents[0]?.uri ?? getBboxUriForImage(workspaceFolder, imageUri, scope);

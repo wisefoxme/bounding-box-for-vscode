@@ -1,4 +1,4 @@
-import type { Bbox } from '../bbox';
+import { decimalPlacesForImage, formatCoord, type Bbox } from '../bbox';
 import type { BboxFormatProvider } from './types';
 
 function parseTesseractBoxLine(line: string): Bbox | null {
@@ -83,15 +83,16 @@ export const tesseractBoxProvider: BboxFormatProvider = {
 		}
 		return boxes;
 	},
-	serialize(boxes: Bbox[], _imgWidth?: number, _imgHeight?: number): string {
+	serialize(boxes: Bbox[], _imgWidth?: number, _imgHeight?: number, _options?: unknown): string {
+		const decimals = decimalPlacesForImage(_imgWidth ?? 0, _imgHeight ?? 0);
 		return boxes
 			.map((b) => {
 				const x_max = b.x_min + b.width;
 				const y_max = b.y_min + b.height;
 				const label = b.label ?? '';
-				return `${label} ${b.x_min} ${b.y_min} ${x_max} ${y_max} 0`;
+				return `${label} ${formatCoord(b.x_min, decimals)} ${formatCoord(b.y_min, decimals)} ${formatCoord(x_max, decimals)} ${formatCoord(y_max, decimals)} 0`;
 			})
-			.join('\n') + (boxes.length ? '\n' : '');
+			.join('\n');
 	},
 	detect(content: string): boolean {
 		const lines = content.trim().split(/\r?\n/).filter(Boolean);

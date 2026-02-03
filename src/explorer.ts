@@ -13,11 +13,7 @@ export class ProjectTreeItem extends vscode.TreeItem {
 		public readonly bboxUri: vscode.Uri | undefined,
 		public readonly workspaceFolder: vscode.WorkspaceFolder,
 	) {
-		const collapsible =
-			bboxUri !== undefined
-				? vscode.TreeItemCollapsibleState.Collapsed
-				: vscode.TreeItemCollapsibleState.None;
-		super(imageUri, collapsible);
+		super(imageUri, vscode.TreeItemCollapsibleState.None);
 		this.contextValue = bboxUri ? 'imageWithBbox' : 'imageOnly';
 		this.tooltip = imageUri.fsPath + (bboxUri ? `\nBbox: ${bboxUri.fsPath}` : '\nNo bbox file');
 		this.iconPath = new vscode.ThemeIcon('file-media');
@@ -78,12 +74,27 @@ function isBoundingBoxesGroupItem(el: ExplorerTreeItem): el is BoundingBoxesGrou
 	return el instanceof BoundingBoxesGroupItem;
 }
 
+export type GetDimensions = (uri: vscode.Uri) => { width: number; height: number } | undefined;
+
 export class ProjectTreeDataProvider implements vscode.TreeDataProvider<ExplorerTreeItem> {
+	private readonly _getDimensions?: GetDimensions;
 	private _onDidChangeTreeData = new vscode.EventEmitter<ExplorerTreeItem | undefined | void>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+	private _projectItemByUri = new Map<string, ProjectTreeItem>();
+
+	constructor(options?: { getDimensions?: GetDimensions }) {
+		this._getDimensions = options?.getDimensions;
+	}
 
 	refresh(): void {
 		this._onDidChangeTreeData.fire();
+	}
+
+	refreshForImage(imageUri: vscode.Uri): void {
+		const projectItem = this._projectItemByUri.get(imageUri.toString());
+		if (projectItem) {
+			this._onDidChangeTreeData.fire(projectItem);
+		}
 	}
 
 	getTreeItem(element: ExplorerTreeItem): vscode.TreeItem {
@@ -108,6 +119,7 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 
 		if (element === undefined) {
 			const items: ProjectTreeItem[] = [];
+			this._projectItemByUri.clear();
 			for (const folder of folders) {
 				const imageDir = getImageDirUri(folder);
 				const pattern = new vscode.RelativePattern(imageDir, IMAGE_GLOB);
@@ -124,30 +136,37 @@ export class ProjectTreeDataProvider implements vscode.TreeDataProvider<Explorer
 							// continue
 						}
 					}
-					items.push(new ProjectTreeItem(imageUri, primary, folder));
+					const projectItem = new ProjectTreeItem(imageUri, primary, folder);
+					items.push(projectItem);
+					this._projectItemByUri.set(imageUri.toString(), projectItem);
 				}
 			}
 			return items.sort((a, b) => a.imageUri.fsPath.localeCompare(b.imageUri.fsPath));
 		}
 
 		if (isProjectTreeItem(element)) {
-			if (element.bboxUri === undefined) {
-				return [];
-			}
-			return [new BoundingBoxesGroupItem(element.imageUri, element.bboxUri, element.workspaceFolder, element)];
+			return [];
 		}
 
 		if (isBoundingBoxesGroupItem(element)) {
-			const merged = await readMergedBboxContent(element.workspaceFolder, element.imageUri);
+			const merged = await readMergedBboxContent(
+				element.workspaceFolder,
+				element.imageUri,
+				undefined,
+				this._getDimensions?.(element.imageUri),
+			);
 			const boxes = merged.boxes;
 			const selectedIndices = getSelectedBoxIndices();
 			if (getSettings().bboxFormat === 'yolo') {
-				return boxes.map((_, i) =>
-					new BoxTreeItem(element.imageUri, i, `Box ${i + 1}`, {
+				return boxes.map((b, i) => {
+					const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;
+					const description = `x:${Math.round(b.x_min)} y:${Math.round(b.y_min)} w:${Math.round(b.width)} h:${Math.round(b.height)}`;
+					return new BoxTreeItem(element.imageUri, i, label, {
+						description,
 						selected: selectedIndices.includes(i),
 						parent: element,
-					}),
-				);
+					});
+				});
 			}
 			return boxes.map((b, i) => {
 				const label = b.label !== undefined && b.label !== '' ? b.label : `Box ${i + 1}`;
@@ -168,8 +187,9 @@ export function registerExplorer(
 	context: vscode.ExtensionContext,
 	onSelectionChange?: (imageUri: vscode.Uri | undefined) => void,
 	refreshBboxSection?: () => void,
+	getDimensions?: GetDimensions,
 ): { provider: ProjectTreeDataProvider; treeView: vscode.TreeView<ExplorerTreeItem> } {
-	const provider = new ProjectTreeDataProvider();
+	const provider = new ProjectTreeDataProvider({ getDimensions });
 	const treeView = vscode.window.createTreeView('boundingBoxEditor.projectView', { treeDataProvider: provider });
 	context.subscriptions.push(treeView);
 

@@ -16,3 +16,4 @@ vsc-extension-quickstart.md
 .cursor/**
 assets/*
 !assets/icon.png
+.github/**

@@ -5,6 +5,7 @@ import {
 	ProjectTreeItem,
 	BoundingBoxesGroupItem,
 	BoxTreeItem,
+	type ExplorerTreeItem,
 } from '../explorer';
 
 suite('explorer', () => {
@@ -20,7 +21,7 @@ suite('explorer', () => {
 		children.forEach((el) => assert.ok(el instanceof ProjectTreeItem, 'each root child is ProjectTreeItem'));
 	});
 
-	test('getChildren(ProjectTreeItem with bboxUri) returns single BoundingBoxesGroupItem', async () => {
+	test('getChildren(ProjectTreeItem) returns empty array (project shows only images)', async () => {
 		const folders = vscode.workspace.workspaceFolders;
 		if (!folders || folders.length === 0) {
 			return;
@@ -30,9 +31,7 @@ suite('explorer', () => {
 		const bboxUri = vscode.Uri.joinPath(folder.uri, 'test-image.txt');
 		const imageItem = new ProjectTreeItem(imageUri, bboxUri, folder);
 		const children = await provider.getChildren(imageItem);
-		assert.strictEqual(children.length, 1, 'one child');
-		assert.ok(children[0] instanceof BoundingBoxesGroupItem, 'child is BoundingBoxesGroupItem');
-		assert.strictEqual((children[0] as BoundingBoxesGroupItem).label, 'Bounding boxes');
+		assert.strictEqual(children.length, 0, 'no children; project panel shows only images');
 	});
 
 	test('getChildren(BoundingBoxesGroupItem with non-existent bbox file) returns empty array', async () => {
@@ -61,7 +60,7 @@ suite('explorer', () => {
 		assert.strictEqual(treeItem, item);
 	});
 
-	test('ProjectTreeItem with bboxUri is collapsible', () => {
+	test('ProjectTreeItem has no collapsible state (flat image list)', () => {
 		const folders = vscode.workspace.workspaceFolders;
 		if (!folders || folders.length === 0) {
 			return;
@@ -70,7 +69,7 @@ suite('explorer', () => {
 		const imageUri = vscode.Uri.joinPath(folder.uri, 'a.png');
 		const bboxUri = vscode.Uri.joinPath(folder.uri, 'a.txt');
 		const item = new ProjectTreeItem(imageUri, bboxUri, folder);
-		assert.strictEqual(item.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+		assert.strictEqual(item.collapsibleState, vscode.TreeItemCollapsibleState.None);
 	});
 
 	test('BoxTreeItem has openImageWithBox command and arguments', () => {
@@ -126,6 +125,104 @@ suite('explorer', () => {
 			} catch {
 				// ignore
 			}
+		}
+	});
+
+	test('getChildren(BoundingBoxesGroupItem) shows YOLO box labels when getDimensions provided', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const base = `test-explorer-yolo-${Date.now()}`;
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Global);
+		const providerWithDimensions = new ProjectTreeDataProvider({
+			getDimensions: () => ({ width: 100, height: 100 }),
+		});
+		try {
+			await vscode.workspace.fs.writeFile(
+				bboxUri,
+				new TextEncoder().encode('person 0.5 0.5 0.2 0.2\ncar 0.25 0.25 0.1 0.1\n'),
+			);
+			const groupItem = new BoundingBoxesGroupItem(imageUri, bboxUri, folder);
+			const children = await providerWithDimensions.getChildren(groupItem);
+			assert.strictEqual(children.length, 2);
+			assert.ok(children[0] instanceof BoxTreeItem);
+			assert.ok(children[1] instanceof BoxTreeItem);
+			assert.strictEqual((children[0] as BoxTreeItem).label, 'person');
+			assert.strictEqual((children[1] as BoxTreeItem).label, 'car');
+		} finally {
+			await config.update('bboxFormat', undefined, vscode.ConfigurationTarget.Global);
+			try {
+				await vscode.workspace.fs.delete(bboxUri);
+			} catch {
+				// ignore
+			}
+		}
+	});
+
+	test('refreshForImage fires onDidChangeTreeData with cached ProjectTreeItem', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const testProvider = new ProjectTreeDataProvider();
+		let firedElement: ExplorerTreeItem | undefined | void = undefined;
+		const disposable = testProvider.onDidChangeTreeData((e) => {
+			firedElement = e;
+		});
+		try {
+			// Populate cache by calling getChildren(undefined)
+			await testProvider.getChildren(undefined);
+			// Find an image URI from the root items
+			const rootItems = await testProvider.getChildren(undefined);
+			if (rootItems.length === 0) {
+				return; // No images in workspace, skip test
+			}
+			const firstImageItem = rootItems[0] as ProjectTreeItem;
+			const imageUri = firstImageItem.imageUri;
+			// Call refreshForImage
+			testProvider.refreshForImage(imageUri);
+			// Assert the event was fired with the correct ProjectTreeItem
+			assert.ok(firedElement !== undefined, 'onDidChangeTreeData should fire');
+			if (firedElement !== undefined && firedElement !== null) {
+				const element = firedElement as ExplorerTreeItem;
+				assert.ok(element instanceof ProjectTreeItem, 'fired element should be ProjectTreeItem');
+				if (element instanceof ProjectTreeItem) {
+					assert.strictEqual(
+						element.imageUri.toString(),
+						imageUri.toString(),
+						'fired element should be the cached ProjectTreeItem for the image',
+					);
+				}
+			}
+		} finally {
+			disposable.dispose();
+		}
+	});
+
+	test('refreshForImage does not fire when imageUri not in cache', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const testProvider = new ProjectTreeDataProvider();
+		let firedCount = 0;
+		const disposable = testProvider.onDidChangeTreeData(() => {
+			firedCount++;
+		});
+		try {
+			// Don't populate cache - call refreshForImage with a non-existent URI
+			const unknownUri = vscode.Uri.joinPath(folders[0].uri, 'nonexistent-image.png');
+			testProvider.refreshForImage(unknownUri);
+			// Assert the event was not fired
+			assert.strictEqual(firedCount, 0, 'onDidChangeTreeData should not fire for unknown imageUri');
+		} finally {
+			disposable.dispose();
 		}
 	});
 });

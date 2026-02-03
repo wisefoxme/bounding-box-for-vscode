@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import type { Bbox } from '../bbox';
 import { BboxSectionTreeDataProvider, BboxSectionPlaceholderItem } from '../bboxSection';
 import { BoxTreeItem } from '../explorer';
 import {
@@ -55,6 +56,21 @@ suite('selectedImage', () => {
 
 suite('bboxSection', () => {
 	const provider = new BboxSectionTreeDataProvider();
+	const providerWithDimensions = new BboxSectionTreeDataProvider({
+		getDimensions: () => ({ width: 100, height: 100 }),
+	});
+
+	test('getParent returns undefined for any element (flat tree)', () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'x.png');
+		const boxItem = new BoxTreeItem(imageUri, 0, 'Box 1');
+		const placeholder = new BboxSectionPlaceholderItem();
+		assert.strictEqual(provider.getParent(boxItem), undefined);
+		assert.strictEqual(provider.getParent(placeholder), undefined);
+	});
 
 	test('getChildren(undefined) returns placeholder when no image selected', async () => {
 		setSelectedImageUri(undefined);
@@ -104,6 +120,63 @@ suite('bboxSection', () => {
 			assert.strictEqual((children[1] as BoxTreeItem).label, 'label2');
 			setSelectedImageUri(undefined);
 		} finally {
+			try {
+				await vscode.workspace.fs.delete(bboxUri);
+			} catch {
+				// ignore
+			}
+		}
+	});
+
+	test('getChildren(undefined) uses getLiveBoxes when it returns an array', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const imageUri = vscode.Uri.joinPath(folders[0].uri, 'live-boxes-test.png');
+		const liveBoxes: Bbox[] = [
+			{ x_min: 0, y_min: 0, width: 10, height: 10, label: 'live1' },
+			{ x_min: 20, y_min: 20, width: 30, height: 30, label: 'live2' },
+		];
+		const providerWithLive = new BboxSectionTreeDataProvider({
+			getLiveBoxes: (uri) => (uri.toString() === imageUri.toString() ? liveBoxes : undefined),
+		});
+		setSelectedImageUri(imageUri);
+		const children = await providerWithLive.getChildren(undefined);
+		setSelectedImageUri(undefined);
+		assert.strictEqual(children.length, 2, 'should use live boxes');
+		assert.ok(children[0] instanceof BoxTreeItem);
+		assert.ok(children[1] instanceof BoxTreeItem);
+		assert.strictEqual((children[0] as BoxTreeItem).label, 'live1');
+		assert.strictEqual((children[1] as BoxTreeItem).label, 'live2');
+	});
+
+	test('getChildren(undefined) shows YOLO box labels when getDimensions provided', async () => {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return;
+		}
+		const folder = folders[0];
+		const base = `test-bbox-section-yolo-${Date.now()}`;
+		const bboxUri = vscode.Uri.joinPath(folder.uri, `${base}.txt`);
+		const imageUri = vscode.Uri.joinPath(folder.uri, `${base}.png`);
+		const config = vscode.workspace.getConfiguration('boundingBoxEditor');
+		await config.update('bboxFormat', 'yolo', vscode.ConfigurationTarget.Global);
+		try {
+			await vscode.workspace.fs.writeFile(
+				bboxUri,
+				new TextEncoder().encode('person 0.5 0.5 0.2 0.2\ncar 0.25 0.25 0.1 0.1\n'),
+			);
+			setSelectedImageUri(imageUri);
+			const children = await providerWithDimensions.getChildren(undefined);
+			assert.strictEqual(children.length, 2, '2 box items');
+			assert.ok(children[0] instanceof BoxTreeItem);
+			assert.ok(children[1] instanceof BoxTreeItem);
+			assert.strictEqual((children[0] as BoxTreeItem).label, 'person');
+			assert.strictEqual((children[1] as BoxTreeItem).label, 'car');
+			setSelectedImageUri(undefined);
+		} finally {
+			await config.update('bboxFormat', undefined, vscode.ConfigurationTarget.Global);
 			try {
 				await vscode.workspace.fs.delete(bboxUri);
 			} catch {
